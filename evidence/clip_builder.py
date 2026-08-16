@@ -31,6 +31,17 @@ def db():
     return psycopg.connect(DATABASE_URL, row_factory=dict_row)
 
 
+def ensure_bucket():
+    for _ in range(30):
+        try:
+            if not minio.bucket_exists(MINIO_BUCKET):
+                minio.make_bucket(MINIO_BUCKET)
+            return
+        except Exception:
+            time.sleep(2)
+    raise RuntimeError("MinIO evidence bucket unavailable")
+
+
 def docker_gateway() -> str:
     if HOST_GATEWAY_NAME:
         return HOST_GATEWAY_NAME
@@ -145,6 +156,7 @@ def build_clip(job):
 
 
 def main():
+    ensure_bucket()
     while True:
         job = claim_job()
         if not job:
