@@ -12,6 +12,7 @@ from .p2p_admin import router as p2p_admin_router
 from .operations import router as operations_router
 from .event_catalog import router as event_catalog_router
 from .live import router as live_router
+from .admin_crud import router as admin_crud_router
 
 app.include_router(platform_router)
 app.include_router(media_router)
@@ -21,3 +22,4 @@ app.include_router(p2p_admin_router)
 app.include_router(operations_router)
 app.include_router(event_catalog_router)
 app.include_router(live_router)
+app.include_router(admin_crud_router)
