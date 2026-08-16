@@ -31,12 +31,22 @@ class OpenSessionResult:
     vendor_metadata: dict[str, Any] | None = None
 
 
+@dataclass(frozen=True)
+class FrameProbeResult:
+    frames_ok: bool
+    frame_count: int
+    first_frame_ms: float | None = None
+    width: int | None = None
+    height: int | None = None
+    codec: str | None = None
+
+
 class IntelbrasWineAdapter:
     """Adapter for an authorized external Intelbras/Wine bridge.
 
-    The proprietary SDK/binaries are deliberately outside this repository.
-    This class invokes one configured executable without a shell and exchanges
-    one JSON document through stdin/stdout.
+    Proprietary SDK/binaries stay outside this repository. The supervisor
+    invokes one configured executable without a shell and exchanges one JSON
+    document through stdin/stdout using contract vision.intelbras.wine.v1.
     """
 
     def __init__(self) -> None:
@@ -68,11 +78,7 @@ class IntelbrasWineAdapter:
 
     def _invoke(self, action: str, payload: dict[str, Any]) -> dict[str, Any]:
         self._require_ready()
-        request = {
-            "contract": "vision.intelbras.wine.v1",
-            "action": action,
-            "payload": payload,
-        }
+        request = {"contract": "vision.intelbras.wine.v1", "action": action, "payload": payload}
         try:
             proc = subprocess.run(
                 [self.executable],
@@ -144,6 +150,23 @@ class IntelbrasWineAdapter:
             raise VendorAdapterError("vendor adapter returned ports different from the reserved leases")
         return parsed
 
+    def probe_frames(self, *, session_ref: str, minimum_frames: int = 3) -> FrameProbeResult:
+        result = self._invoke("probe_frames", {"session_ref": session_ref, "minimum_frames": minimum_frames})
+        try:
+            parsed = FrameProbeResult(
+                frames_ok=bool(result["frames_ok"]),
+                frame_count=int(result["frame_count"]),
+                first_frame_ms=float(result["first_frame_ms"]) if result.get("first_frame_ms") is not None else None,
+                width=int(result["width"]) if result.get("width") is not None else None,
+                height=int(result["height"]) if result.get("height") is not None else None,
+                codec=str(result["codec"]) if result.get("codec") is not None else None,
+            )
+        except (KeyError, TypeError, ValueError) as exc:
+            raise VendorAdapterError("vendor adapter probe_frames result is incomplete") from exc
+        if not parsed.frames_ok or parsed.frame_count < minimum_frames:
+            raise VendorAdapterError(f"frame probe failed: received {parsed.frame_count}/{minimum_frames} frames")
+        return parsed
+
     def close_session(self, *, session_ref: str) -> dict[str, Any]:
         return self._invoke("close_session", {"session_ref": session_ref})
 
@@ -152,6 +175,5 @@ class IntelbrasWineAdapter:
 
     def public_status(self) -> dict[str, Any]:
         data = asdict(self.status())
-        # Do not expose arbitrary host paths through the API.
         data["executable"] = Path(data["executable"]).name if data["executable"] else None
         return data
