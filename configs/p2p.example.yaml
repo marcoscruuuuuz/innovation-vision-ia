@@ -1,0 +1,19 @@
+version: 1
+p2p:
+  port_pool:
+    sdk_tcp:
+      start: 21000
+      end: 21999
+    rtsp:
+      start: 22000
+      end: 22999
+  reconnect:
+    initial_backoff_seconds: 2
+    max_backoff_seconds: 60
+    stable_reset_seconds: 300
+  health:
+    frame_timeout_seconds: 10
+    tunnel_timeout_seconds: 20
+  scheduler:
+    rebalance_cooldown_seconds: 300
+    max_migrations_per_cycle: 1

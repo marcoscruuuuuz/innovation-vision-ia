@@ -1,0 +1,18 @@
+version: 1
+cameras:
+  - id: cam-paladio-dvr01-ch01
+    condominium_id: paladio
+    dvr_id: paladio-dvr01
+    channel: 1
+    name: Bloco 01 Entrada
+    enabled: true
+    transport: intelbras_p2p
+    stream:
+      analysis_fps: 2
+      analysis_size: [960, 540]
+      editor_use_main_stream: true
+    p2p:
+      serial_ref: secret://cameras/paladio-dvr01/serial
+      username_ref: secret://cameras/paladio-dvr01/username
+      password_ref: secret://cameras/paladio-dvr01/password
+    rules: []
