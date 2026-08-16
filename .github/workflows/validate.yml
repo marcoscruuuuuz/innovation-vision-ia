@@ -18,14 +18,31 @@ jobs:
       - name: Compile Python
         run: |
           python3 -m compileall -q core/api/app
-          python3 -m compileall -q p2p
           python3 -m compileall -q ingestion
-      - name: Validate Compose
-        run: docker compose config --quiet
-      - name: Build application images
-        run: docker compose build api p2p-supervisor stream-broker ingestion-api
+          python3 -m compileall -q detection
+          python3 -m compileall -q rules
+          python3 -m compileall -q certification
+          python3 -m compileall -q ops
+          python3 -m compileall -q p2p
+      - name: Validate Compose and deferred P2P profile
+        run: |
+          docker compose config --quiet
+          ! docker compose config --services | grep -qx 'p2p-supervisor'
+          ! docker compose config --services | grep -qx 'stream-broker'
+          docker compose --profile p2p config --services | grep -qx 'p2p-supervisor'
+          docker compose --profile p2p config --services | grep -qx 'stream-broker'
+      - name: Build core application images
+        run: docker compose build api ingestion-api detection-worker rule-worker certification-worker retention-worker portal-admin portal-client
       - name: Validate migrations on PostgreSQL
         run: |
           docker compose up -d postgres
           docker compose run --rm db-migrate
-          docker compose exec -T postgres psql -U vision -d vision -v ON_ERROR_STOP=1 -c "SELECT to_regclass('public.stream_routes'), to_regclass('public.p2p_failover_state'), to_regclass('public.ingestion_sources'), to_regclass('public.ingestion_events'), to_regclass('public.ingestion_nonces');"
+          docker compose exec -T postgres psql -U vision -d vision -v ON_ERROR_STOP=1 -c "SELECT to_regclass('public.ingestion_events'), to_regclass('public.detection_results'), to_regclass('public.rule_evaluations'), to_regclass('public.event_confidence_policies'), to_regclass('public.user_api_tokens'), to_regclass('public.retention_job_runs');"
+      - name: Smoke core HTTP services
+        run: |
+          docker compose up -d redis minio api ingestion-api portal-admin portal-client
+          for i in $(seq 1 30); do curl -fsS http://127.0.0.1:8080/health >/dev/null && break; sleep 2; done
+          curl -fsS http://127.0.0.1:8080/health
+          curl -fsS http://127.0.0.1:8100/health
+          curl -fsS http://127.0.0.1:8083/ >/dev/null
+          curl -fsS http://127.0.0.1:8084/ >/dev/null
