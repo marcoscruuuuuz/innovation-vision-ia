@@ -1,0 +1,36 @@
+version: 1
+geometry_types:
+  rectangle: true
+  polygon: true
+  line: true
+  double_line: true
+  trigger_line: true
+  door_roi_with_auto_line: true
+sectors:
+  BLOCOS: [porta_aberta_bloco, area_janelas_apartamentos, linha_perimetral, area_interesse, cachorro_solto, cachorro_fazendo_fezes]
+  PORTAO_ENTRADA_SAIDA: [entrada_vacuo, saida_vacuo, pessoa_portao_veicular]
+  AREA_COMUM: [crianca_bicicleta_area_comum, crianca_correndo_area_comum, veiculo_area_proibida, veiculo_contramao, movimentacao_apos_22h, bola_fora_quadra, crianca_soltando_pipa, placa_detectada, cachorro_solto, cachorro_fazendo_fezes]
+  PORTARIA: [face_detectada, porteiro_dormindo, porteiro_fora_posto]
+  LIXEIRA: [lixo_no_chao]
+events:
+  porta_aberta_bloco: {geometry_required: true, geometry: door_roi_with_auto_line, default_duration_seconds: 15, line_side_default: left, line_side_invertible: true, certification_required: true}
+  area_janelas_apartamentos: {geometry_required: true, geometry: polygon, certification_required: true}
+  linha_perimetral: {geometry_required: true, geometry: line, certification_required: true}
+  area_interesse: {geometry_required: true, geometry: polygon, certification_required: true}
+  cachorro_solto: {geometry_required: false, engine: detector_tracker_temporal, certification_required: true}
+  cachorro_fazendo_fezes: {geometry_required: false, engine: detector_pose_temporal_vlm_review, certification_required: true}
+  entrada_vacuo: {geometry_required: true, geometry: double_line, engine: tracker_temporal, certification_required: true}
+  saida_vacuo: {geometry_required: true, geometry: double_line, engine: tracker_temporal, certification_required: true}
+  pessoa_portao_veicular: {geometry_required: true, geometry: line, engine: person_tracker, certification_required: true}
+  crianca_bicicleta_area_comum: {geometry_required: false, engine: child_classifier_object_association, certification_required: true}
+  crianca_correndo_area_comum: {geometry_required: false, engine: child_classifier_pose_tracker, certification_required: true}
+  veiculo_area_proibida: {geometry_required: true, geometry: line, default_duration_seconds: 20, engine: vehicle_tracker_temporal, certification_required: true}
+  veiculo_contramao: {geometry_required: true, geometry: line, engine: vehicle_tracker_direction, certification_required: true}
+  movimentacao_apos_22h: {geometry_required: false, engine: motion_scene_change_detector, schedule_default: '22:00-06:00', certification_required: true}
+  bola_fora_quadra: {geometry_required: true, geometry: polygon, engine: child_person_ball_association, certification_required: true}
+  crianca_soltando_pipa: {geometry_required: false, engine: child_person_kite_temporal, certification_required: true}
+  placa_detectada: {geometry_required: false, engine: vehicle_plate_detector_ocr_temporal_vote, certification_required: true}
+  face_detectada: {geometry_required: false, engine: face_detector, certification_required: true}
+  porteiro_dormindo: {geometry_required: true, geometry: polygon, engine: person_pose_inactivity, certification_required: true}
+  porteiro_fora_posto: {geometry_required: true, geometry: polygon, engine: person_absence_temporal, certification_required: true}
+  lixo_no_chao: {geometry_required: true, geometry: polygon, engine: person_object_abandonment, certification_required: true}
