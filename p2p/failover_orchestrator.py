@@ -15,7 +15,7 @@ P2P_SUPERVISOR_URL = os.getenv("P2P_SUPERVISOR_URL", "http://p2p-supervisor:8090
 STREAM_BROKER_URL = os.getenv("STREAM_BROKER_URL", "http://stream-broker:8091")
 REQUEST_TIMEOUT = float(os.getenv("FAILOVER_REQUEST_TIMEOUT", "45"))
 
-app = FastAPI(title="INNOVATION VISION Failover Orchestrator", version="0.2.0")
+app = FastAPI(title="INNOVATION VISION Failover Orchestrator", version="0.3.0")
 
 
 def db():
@@ -78,19 +78,28 @@ def history(dvr_id: UUID):
 @app.post("/v1/failover/{dvr_id}/run")
 def run_failover(dvr_id: UUID, payload: FailoverRequest):
     with db() as conn, conn.cursor() as cur:
-        cur.execute("SELECT * FROM dvrs WHERE id=%s FOR UPDATE",(dvr_id,)); dvr=cur.fetchone()
+        cur.execute("SELECT * FROM dvrs WHERE id=%s",(dvr_id,)); dvr=cur.fetchone()
         if not dvr: raise HTTPException(status_code=404, detail="DVR not found")
         cur.execute("SELECT * FROM p2p_sessions WHERE dvr_id=%s AND ended_at IS NULL AND state IN ('ACTIVE','DEGRADED') ORDER BY started_at DESC LIMIT 1",(dvr_id,)); source=cur.fetchone()
         source_worker_id=source["wine_worker_id"] if source else None
         destination_worker=select_destination_worker(cur,source_worker_id)
         if not destination_worker: raise HTTPException(status_code=503, detail="no alternate healthy Wine worker available")
+
+    plan={"dvr_id":str(dvr_id),"source_session_id":str(source["id"]) if source else None,"destination_worker_id":str(destination_worker["id"]),"destination_worker_key":destination_worker["worker_key"],"steps":["open destination P2P session on alternate Wine","validate destination with real frames","switch every camera route to destination session","verify resulting active routes","close source session","release old leases","commit operation and audit"]}
+    if not payload.execute:
+        return {"mode":"PLAN","plan":plan}
+
+    with db() as conn, conn.cursor() as cur:
+        cur.execute("SELECT id,state,step FROM p2p_failover_operations WHERE dvr_id=%s AND completed_at IS NULL AND state NOT IN ('COMMITTED','ROLLED_BACK','FAILED') LIMIT 1",(dvr_id,))
+        active=cur.fetchone()
+        if active:
+            raise HTTPException(status_code=409, detail={"message":"failover already in progress","operation":active})
+        cur.execute("SELECT id FROM dvrs WHERE id=%s FOR UPDATE",(dvr_id,))
         cur.execute("""INSERT INTO p2p_failover_operations(dvr_id,source_session_id,source_wine_worker_id,destination_wine_worker_id,actor_type,reason,state,step,details)
                        VALUES (%s,%s,%s,%s,%s,%s,'PLANNED','select_destination',%s::jsonb) RETURNING *""",
                     (dvr_id,source["id"] if source else None,source_worker_id,destination_worker["id"],payload.actor_type,payload.reason,json.dumps({"destination_worker":destination_worker["worker_key"],"load_score":float(destination_worker["load_score"])})))
         op=cur.fetchone(); conn.commit()
-
-    plan={"operation_id":str(op["id"]),"dvr_id":str(dvr_id),"source_session_id":str(source["id"]) if source else None,"destination_worker_id":str(destination_worker["id"]),"destination_worker_key":destination_worker["worker_key"],"steps":["open destination P2P session on alternate Wine","validate destination with real frames","switch every camera route to destination session","verify resulting active routes","close source session","release old leases","commit operation and audit"]}
-    if not payload.execute: return {"mode":"PLAN","plan":plan}
+    plan["operation_id"]=str(op["id"])
 
     destination_session=None; switched_cameras=[]; rollback_errors=[]
     try:
