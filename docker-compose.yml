@@ -33,8 +33,7 @@ services:
     environment:
       PGPASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
     depends_on:
-      postgres:
-        condition: service_healthy
+      postgres: {condition: service_healthy}
     volumes:
       - ./architecture/migrations:/migrations:ro
     command: ["sh", "-c", "set -e; for f in /migrations/*.sql; do echo Applying $$f; psql -h postgres -U ${POSTGRES_USER:-vision} -d ${POSTGRES_DB:-vision} -v ON_ERROR_STOP=1 -f $$f; done"]
@@ -44,8 +43,7 @@ services:
     image: redis:7-alpine
     restart: unless-stopped
     command: ["redis-server", "--appendonly", "no", "--maxmemory", "${REDIS_MAXMEMORY:-2gb}", "--maxmemory-policy", "${REDIS_MAXMEMORY_POLICY:-allkeys-lru}"]
-    volumes:
-      - ./data/redis:/data
+    volumes: ["./data/redis:/data"]
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
@@ -60,11 +58,8 @@ services:
     environment:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER:?MINIO_ROOT_USER is required}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?MINIO_ROOT_PASSWORD is required}
-    volumes:
-      - ./data/minio:/data
-    ports:
-      - "127.0.0.1:9000:9000"
-      - "127.0.0.1:9001:9001"
+    volumes: ["./data/minio:/data"]
+    ports: ["127.0.0.1:9000:9000", "127.0.0.1:9001:9001"]
     networks: [vision_backend]
 
   api:
@@ -78,6 +73,8 @@ services:
       MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-visionminio}
       MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD}
       MINIO_BUCKET: ${MINIO_EVIDENCE_BUCKET:-vision-evidence}
+      FAILOVER_ORCHESTRATOR_URL: http://failover-orchestrator:8092
+      FAILOVER_API_TIMEOUT: ${FAILOVER_API_TIMEOUT:-60}
     depends_on:
       db-migrate: {condition: service_completed_successfully}
       minio: {condition: service_started}
@@ -223,8 +220,7 @@ services:
       INTELBRAS_VENDOR_ADAPTER_TIMEOUT: ${INTELBRAS_VENDOR_ADAPTER_TIMEOUT:-30}
     depends_on:
       db-migrate: {condition: service_completed_successfully}
-    volumes:
-      - ./secrets/vendor/intelbras:/vendor/intelbras:ro
+    volumes: ["./secrets/vendor/intelbras:/vendor/intelbras:ro"]
     ports: ["127.0.0.1:${VISION_P2P_API_PORT:-8090}:8090"]
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8090/health', timeout=3)"]
@@ -273,6 +269,26 @@ services:
       interval: 15s
       timeout: 5s
       retries: 10
+    networks: [vision_backend]
+
+  p2p-watchdog:
+    profiles: ["p2p"]
+    build: {context: ./p2p}
+    restart: unless-stopped
+    command: ["python", "watchdog.py"]
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-vision}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-vision}
+      STREAM_BROKER_URL: http://stream-broker:8091
+      FAILOVER_ORCHESTRATOR_URL: http://failover-orchestrator:8092
+      P2P_WATCHDOG_INTERVAL_SECONDS: ${P2P_WATCHDOG_INTERVAL_SECONDS:-15}
+      P2P_WATCHDOG_HTTP_TIMEOUT: ${P2P_WATCHDOG_HTTP_TIMEOUT:-30}
+      P2P_AUTO_FAILOVER_ENABLED: ${P2P_AUTO_FAILOVER_ENABLED:-true}
+      INTELBRAS_VENDOR_ADAPTER_ENABLED: ${INTELBRAS_VENDOR_ADAPTER_ENABLED:-false}
+      INTELBRAS_VENDOR_ADAPTER_COMMAND: ${INTELBRAS_VENDOR_ADAPTER_COMMAND:-/vendor/intelbras/vision-intelbras-adapter}
+      INTELBRAS_VENDOR_ADAPTER_TIMEOUT: ${INTELBRAS_VENDOR_ADAPTER_TIMEOUT:-30}
+    depends_on:
+      failover-orchestrator: {condition: service_healthy}
+    volumes: ["./secrets/vendor/intelbras:/vendor/intelbras:ro"]
     networks: [vision_backend]
 
   prometheus:
