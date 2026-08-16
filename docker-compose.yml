@@ -72,6 +72,30 @@ services:
       retries: 10
     networks: [vision_backend]
 
+  p2p-supervisor:
+    build:
+      context: ./p2p
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-vision}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-vision}
+      P2P_SDK_PORT_START: ${P2P_SDK_PORT_START:-21000}
+      P2P_SDK_PORT_END: ${P2P_SDK_PORT_END:-21999}
+      P2P_RTSP_PORT_START: ${P2P_RTSP_PORT_START:-22000}
+      P2P_RTSP_PORT_END: ${P2P_RTSP_PORT_END:-22999}
+      P2P_LEASE_SECONDS: ${P2P_LEASE_SECONDS:-120}
+      INTELBRAS_VENDOR_ADAPTER_ENABLED: ${INTELBRAS_VENDOR_ADAPTER_ENABLED:-false}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:${VISION_P2P_API_PORT:-8090}:8090"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8090/health', timeout=3)"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+    networks: [vision_backend]
+
   prometheus:
     image: prom/prometheus:latest
     restart: unless-stopped
