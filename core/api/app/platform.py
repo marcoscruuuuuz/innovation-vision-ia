@@ -152,6 +152,9 @@ def list_rules(camera_id: UUID | None = None, authorization: str | None = Header
 @router.post("/api/v1/admin/rules", status_code=201)
 def save_rule(payload: RuleConfig, authorization: str | None = Header(default=None)):
     principal = require_admin(authorization)
+    # Abertura de porta exige validação física: nenhuma chamada administrativa pode
+    # promover a regra antes dessa evidência externa existir.
+    certification_status = "HOMOLOGATION" if payload.event_type in {"porta_aberta_bloco", "porta_bloco_aberta"} else payload.certification_status
     with pool.connection() as conn, conn.cursor() as cur:
         cur.execute("SELECT id FROM cameras WHERE id=%s", (payload.camera_id,))
         if not cur.fetchone():
@@ -181,13 +184,13 @@ def save_rule(payload: RuleConfig, authorization: str | None = Header(default=No
                 rule["id"], version,
                 __import__("json").dumps(payload.geometry) if payload.geometry is not None else None,
                 __import__("json").dumps(payload.parameters), __import__("json").dumps(payload.model_requirements),
-                payload.certification_status, principal.get("user_id"),
+                certification_status, principal.get("user_id"),
             ),
         )
         version_row = cur.fetchone()
         cur.execute(
             "INSERT INTO audit_logs(actor_type,actor_id,action,object_type,object_id,metadata) VALUES ('USER',%s,'rule.version.create','event_rule',%s,jsonb_build_object('version',%s,'status',%s))",
-            (str(principal.get("user_id")) if principal.get("user_id") else "bootstrap", str(rule["id"]), version, payload.certification_status),
+            (str(principal.get("user_id")) if principal.get("user_id") else "bootstrap", str(rule["id"]), version, certification_status),
         )
         conn.commit()
         return {"rule": rule, "version": version_row}
