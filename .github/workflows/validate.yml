@@ -31,13 +31,15 @@ jobs:
           ! docker compose config --services | grep -qx 'p2p-supervisor'
           ! docker compose config --services | grep -qx 'stream-broker'
           ! docker compose config --services | grep -qx 'failover-orchestrator'
+          ! docker compose config --services | grep -qx 'p2p-watchdog'
           docker compose --profile p2p config --services | grep -qx 'p2p-supervisor'
           docker compose --profile p2p config --services | grep -qx 'stream-broker'
           docker compose --profile p2p config --services | grep -qx 'failover-orchestrator'
+          docker compose --profile p2p config --services | grep -qx 'p2p-watchdog'
       - name: Build core application images
         run: docker compose build api ingestion-api detection-worker rule-worker certification-worker notification-worker retention-worker portal-admin portal-client
       - name: Build final P2P profile images
-        run: docker compose --profile p2p build p2p-supervisor stream-broker failover-orchestrator
+        run: docker compose --profile p2p build p2p-supervisor stream-broker failover-orchestrator p2p-watchdog
       - name: Validate migrations on PostgreSQL
         run: |
           docker compose up -d postgres
@@ -53,11 +55,13 @@ jobs:
           curl -fsS http://127.0.0.1:8100/health
           curl -fsS http://127.0.0.1:8083/ >/dev/null
           curl -fsS http://127.0.0.1:8083/rules.html >/dev/null
+          curl -fsS http://127.0.0.1:8083/p2p.html >/dev/null
           curl -fsS http://127.0.0.1:8084/ >/dev/null
       - name: Smoke final P2P control plane with vendor disabled
         run: |
-          docker compose --profile p2p up -d p2p-supervisor stream-broker failover-orchestrator
+          docker compose --profile p2p up -d p2p-supervisor stream-broker failover-orchestrator p2p-watchdog
           for i in $(seq 1 30); do curl -fsS http://127.0.0.1:8090/health >/dev/null && break; sleep 2; done
           curl -fsS http://127.0.0.1:8090/health | grep -q 'vendor_adapter'
           curl -fsS http://127.0.0.1:8091/health
           curl -fsS http://127.0.0.1:8092/health
+          docker compose ps p2p-watchdog | grep -q 'Up'
