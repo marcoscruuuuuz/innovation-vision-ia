@@ -22,6 +22,7 @@ jobs:
           python3 -m compileall -q detection
           python3 -m compileall -q rules
           python3 -m compileall -q certification
+          python3 -m compileall -q notifications
           python3 -m compileall -q ops
           python3 -m compileall -q p2p
       - name: Validate Compose and deferred P2P profile
@@ -32,17 +33,20 @@ jobs:
           docker compose --profile p2p config --services | grep -qx 'p2p-supervisor'
           docker compose --profile p2p config --services | grep -qx 'stream-broker'
       - name: Build core application images
-        run: docker compose build api ingestion-api detection-worker rule-worker certification-worker retention-worker portal-admin portal-client
+        run: docker compose build api ingestion-api detection-worker rule-worker certification-worker notification-worker retention-worker portal-admin portal-client
       - name: Validate migrations on PostgreSQL
         run: |
           docker compose up -d postgres
           docker compose run --rm db-migrate
-          docker compose exec -T postgres psql -U vision -d vision -v ON_ERROR_STOP=1 -c "SELECT to_regclass('public.ingestion_events'), to_regclass('public.detection_results'), to_regclass('public.rule_evaluations'), to_regclass('public.event_confidence_policies'), to_regclass('public.user_api_tokens'), to_regclass('public.retention_job_runs');"
+          docker compose exec -T postgres psql -U vision -d vision -v ON_ERROR_STOP=1 -c "SELECT to_regclass('public.ingestion_events'), to_regclass('public.detection_results'), to_regclass('public.rule_evaluations'), to_regclass('public.event_confidence_policies'), to_regclass('public.user_api_tokens'), to_regclass('public.retention_job_runs'), to_regclass('public.alert_policies');"
+          docker compose exec -T postgres psql -U vision -d vision -v ON_ERROR_STOP=1 -c "SELECT rolname FROM pg_roles WHERE rolname='vision_portal';"
       - name: Smoke core HTTP services
         run: |
           docker compose up -d redis minio api ingestion-api portal-admin portal-client
           for i in $(seq 1 30); do curl -fsS http://127.0.0.1:8080/health >/dev/null && break; sleep 2; done
           curl -fsS http://127.0.0.1:8080/health
+          curl -fsS -H 'Authorization: Bearer CHANGE_ME_ADMIN_TOKEN' http://127.0.0.1:8080/api/v1/admin/dashboard
           curl -fsS http://127.0.0.1:8100/health
           curl -fsS http://127.0.0.1:8083/ >/dev/null
+          curl -fsS http://127.0.0.1:8083/rules.html >/dev/null
           curl -fsS http://127.0.0.1:8084/ >/dev/null
