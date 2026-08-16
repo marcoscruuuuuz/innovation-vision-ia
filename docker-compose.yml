@@ -14,6 +14,7 @@ services:
       - ./architecture/schema.sql:/docker-entrypoint-initdb.d/001-schema.sql:ro
       - ./architecture/migrations/002_p2p_runtime.sql:/docker-entrypoint-initdb.d/002-p2p-runtime.sql:ro
       - ./architecture/migrations/003_streambroker_failover.sql:/docker-entrypoint-initdb.d/003-streambroker-failover.sql:ro
+      - ./architecture/migrations/004_reactive_ingestion.sql:/docker-entrypoint-initdb.d/004-reactive-ingestion.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-vision} -d ${POSTGRES_DB:-vision}"]
       interval: 10s
@@ -75,6 +76,37 @@ services:
       - "127.0.0.1:${VISION_API_PORT:-8080}:8080"
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health', timeout=3)"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+    networks: [vision_backend]
+
+  ingestion-api:
+    build:
+      context: ./ingestion
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-vision}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-vision}
+      REDIS_URL: redis://redis:6379/0
+      INGESTION_REDIS_STREAM: ${INGESTION_REDIS_STREAM:-vision:ingestion:events}
+      MINIO_ENDPOINT: http://minio:9000
+      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-visionminio}
+      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD}
+      MINIO_INGESTION_BUCKET: ${MINIO_INGESTION_BUCKET:-vision-ingestion}
+      INGESTION_MAX_BODY_BYTES: ${INGESTION_MAX_BODY_BYTES:-12582912}
+      INGESTION_MAX_SNAPSHOT_BYTES: ${INGESTION_MAX_SNAPSHOT_BYTES:-10485760}
+      INGESTION_HMAC_KEYS_JSON: ${INGESTION_HMAC_KEYS_JSON:-{}}
+    depends_on:
+      db-migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_started
+    ports:
+      - "127.0.0.1:${VISION_INGESTION_PORT:-8100}:8100"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8100/health', timeout=3)"]
       interval: 15s
       timeout: 5s
       retries: 10
