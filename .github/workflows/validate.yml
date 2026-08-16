@@ -13,5 +13,11 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y shellcheck python3-yaml
       - name: Prepare validation environment
         run: cp .env.example .env
-      - name: Validate
+      - name: Validate repository
         run: bash scripts/validate_repo.sh
+      - name: Compile Python
+        run: python3 -m compileall -q core/api/app
+      - name: Validate Compose
+        run: docker compose config --quiet
+      - name: Build API image
+        run: docker compose build api
