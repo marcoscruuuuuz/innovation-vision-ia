@@ -10,7 +10,7 @@ DECLARE
 BEGIN
     SELECT event_type INTO event_name FROM event_rules WHERE id = NEW.event_rule_id;
 
-    engine_name := CASE event_name
+    engine_name := CASE
         WHEN event_name IN ('porta_aberta_bloco', 'porta_bloco_aberta', 'porta_manutencao') THEN 'door_structural_change_temporal'
         WHEN event_name IN ('linha_perimetral', 'linha_perimetral_cerca_eletrica', 'linha_perimetral_disparo', 'linha_velocidade',
              'entrada_vacuo', 'saida_vacuo') THEN 'tracker_temporal'
