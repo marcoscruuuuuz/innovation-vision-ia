@@ -9,7 +9,7 @@ ok() { printf '[OK] %s\n' "$*"; }
 warn() { printf '[WARN] %s\n' "$*"; }
 fail() { printf '[FAIL] %s\n' "$*" >&2; failures=$((failures + 1)); }
 
-required_files=(README.md docker-compose.yml .env.example architecture/schema.sql configs/event_catalog.yaml configs/p2p.example.yaml scripts/install_ubuntu.sh docs/01-ARCHITECTURE.md docs/02-DASHBOARD.md docs/03-EVENTS.md docs/04-P2P-WINE.md docs/05-CERTIFICATION.md docs/06-AI-IDE.md docs/07-DATA-SECURITY.md docs/08-INSTALLATION.md docs/09-IMPLEMENTATION-PHASES.md docs/10-ACCEPTANCE.md docs/11-REACTIVE-INGESTION.md docs/12-CORE-PLATFORM.md architecture/migrations/010_operational_portals.sql architecture/migrations/011_rule_engine_defaults.sql architecture/migrations/012_evidence_clip_jobs.sql architecture/migrations/013_temporal_candidate_idempotency.sql architecture/migrations/014_after_22h_guard.sql architecture/migrations/015_event_catalog_canonical_defaults.sql architecture/migrations/016_client_condominiums_rls.sql architecture/migrations/017_after_hours_alias_guard.sql)
+required_files=(README.md docker-compose.yml .env.example architecture/schema.sql configs/event_catalog.yaml configs/p2p.example.yaml scripts/install_ubuntu.sh docs/01-ARCHITECTURE.md docs/02-DASHBOARD.md docs/03-EVENTS.md docs/04-P2P-WINE.md docs/05-CERTIFICATION.md docs/06-AI-IDE.md docs/07-DATA-SECURITY.md docs/08-INSTALLATION.md docs/09-IMPLEMENTATION-PHASES.md docs/10-ACCEPTANCE.md docs/11-REACTIVE-INGESTION.md docs/12-CORE-PLATFORM.md architecture/migrations/010_operational_portals.sql architecture/migrations/011_rule_engine_defaults.sql architecture/migrations/012_evidence_clip_jobs.sql architecture/migrations/013_temporal_candidate_idempotency.sql architecture/migrations/014_after_22h_guard.sql architecture/migrations/015_event_catalog_canonical_defaults.sql architecture/migrations/016_client_condominiums_rls.sql architecture/migrations/017_after_hours_alias_guard.sql architecture/migrations/018_t2u_gateway_sessions.sql p2p/t2u_capture.py p2p/t2u_status_sync.py)
 for path in "${required_files[@]}"; do
   if [[ -f "$path" ]]; then ok "arquivo presente: $path"; else fail "arquivo ausente: $path"; fi
 done
@@ -71,7 +71,7 @@ allowed_top = {'name','services','networks','volumes','secrets','configs'}
 unknown_top = set(compose) - allowed_top
 if unknown_top:
     raise SystemExit(f'chaves top-level Compose não reconhecidas: {sorted(unknown_top)}')
-allowed_service = {'image','build','restart','environment','volumes','healthcheck','networks','command','ports','profiles','deploy','pid','cap_add','depends_on','user','entrypoint','working_dir','read_only','tmpfs','security_opt','devices','runtime','ipc','shm_size','ulimits'}
+allowed_service = {'image','build','restart','environment','volumes','healthcheck','networks','command','ports','profiles','deploy','pid','cap_add','depends_on','user','entrypoint','working_dir','read_only','tmpfs','security_opt','devices','runtime','ipc','shm_size','ulimits','extra_hosts'}
 for name, svc in compose['services'].items():
     if not isinstance(svc, dict):
         raise SystemExit(f'serviço {name} não é objeto')
@@ -122,3 +122,4 @@ fi
 
 if (( failures > 0 )); then printf '\nValidação concluída com %d falha(s).\n' "$failures" >&2; exit 1; fi
 printf '\nValidação concluída sem falhas bloqueantes.\n'
+
