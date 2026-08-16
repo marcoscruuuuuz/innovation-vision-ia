@@ -162,14 +162,14 @@ def process(result_id: str):
             requirements = rule["model_requirements"] if isinstance(rule["model_requirements"], dict) else json.loads(rule["model_requirements"] or "{}")
             engine = str(params.get("engine") or requirements.get("engine") or "snapshot_detector")
 
-            if detection["status"] == "BLOCKED_MODEL" and engine not in {"door_structural_change_temporal", "motion_scene_change_detector"}:
+            if engine in TEMPORAL_ENGINES or bool(params.get("requires_temporal")):
+                outcome = "NEEDS_TEMPORAL"
+                confidence = None
+                details = {"processing_mode": detection["processing_mode"], "engine": engine, "snapshot_status": detection["status"]}
+            elif detection["status"] == "BLOCKED_MODEL":
                 outcome = "MODEL_REQUIRED"
                 confidence = None
                 details = {"error": detection["error"], "engine": engine}
-            elif engine in TEMPORAL_ENGINES or bool(params.get("requires_temporal")):
-                outcome = "NEEDS_TEMPORAL"
-                confidence = None
-                details = {"processing_mode": detection["processing_mode"], "engine": engine}
             else:
                 best = choose_detection(detections, params, geometry)
                 outcome = "MATCH" if best else "NO_MATCH"
