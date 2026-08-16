@@ -4,7 +4,7 @@ set -Eeuo pipefail
 SOURCE_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 VISION_ROOT="${VISION_ROOT:-/opt/vision}"
 INSTALL_TAILSCALE="${INSTALL_TAILSCALE:-yes}"
-INSTALL_WINE="${INSTALL_WINE:-yes}"
+INSTALL_WINE="${INSTALL_WINE:-no}"
 INSTALL_NVIDIA_TOOLKIT="${INSTALL_NVIDIA_TOOLKIT:-auto}"
 INSTALL_NVIDIA_DRIVER="${INSTALL_NVIDIA_DRIVER:-no}"
 START_INFRA="${START_INFRA:-yes}"
@@ -71,8 +71,8 @@ DOCKER_EOF
 }
 
 install_wine() {
-  [[ "$INSTALL_WINE" == yes ]] || return 0
-  log 'Instalando Wine 64/32 bits e dependências para bridges P2P'
+  [[ "$INSTALL_WINE" == yes ]] || { log 'Wine/P2P adiado; não será instalado nesta fase'; return 0; }
+  log 'Instalando Wine 64/32 bits para a fase final P2P'
   dpkg --add-architecture i386
   apt-get update
   apt-get install -y wine64 wine32:i386 winbind cabextract xvfb
@@ -140,13 +140,16 @@ install_repository() {
   mkdir -p "$VISION_ROOT/data/postgres" "$VISION_ROOT/data/redis" "$VISION_ROOT/data/minio" "$VISION_ROOT/models" "$VISION_ROOT/logs" "$VISION_ROOT/backups" "$VISION_ROOT/secrets/vendor/intelbras" "$VISION_ROOT/secrets/cameras" "$VISION_ROOT/secrets/evolution"
   if [[ ! -f "$VISION_ROOT/.env" ]]; then
     cp "$VISION_ROOT/.env.example" "$VISION_ROOT/.env"
-    local postgres_password minio_password grafana_password
+    local postgres_password minio_password grafana_password admin_token
     postgres_password="$(openssl rand -hex 32)"
     minio_password="$(openssl rand -hex 32)"
     grafana_password="$(openssl rand -hex 24)"
+    admin_token="$(openssl rand -hex 32)"
     sed -i "s/CHANGE_ME_POSTGRES/${postgres_password}/" "$VISION_ROOT/.env"
     sed -i "s/CHANGE_ME_MINIO/${minio_password}/" "$VISION_ROOT/.env"
     sed -i "s/CHANGE_ME_GRAFANA/${grafana_password}/" "$VISION_ROOT/.env"
+    sed -i "s/CHANGE_ME_ADMIN_TOKEN/${admin_token}/" "$VISION_ROOT/.env"
+    printf '%s\n' "$admin_token" >"$VISION_ROOT/secrets/bootstrap-admin-token"
   fi
   chown "$VISION_USER:$VISION_USER" "$VISION_ROOT"
   find "$VISION_ROOT" -mindepth 1 -maxdepth 1 ! -name data -exec chown -R "$VISION_USER:$VISION_USER" {} +
@@ -156,11 +159,13 @@ install_repository() {
   chmod 0600 "$VISION_ROOT/.env"
 }
 
+core_services=(postgres redis minio prometheus node-exporter grafana api ingestion-api detection-worker rule-worker certification-worker notification-worker retention-worker portal-admin portal-client)
+
 install_systemd_unit() {
-  log 'Instalando unidade systemd da infraestrutura VISION'
+  log 'Instalando unidade systemd da plataforma VISION'
   cat >/etc/systemd/system/innovation-vision-infra.service <<UNIT_EOF
 [Unit]
-Description=INNOVATION VISION IA infrastructure
+Description=INNOVATION VISION IA core platform
 Requires=docker.service
 After=docker.service network-online.target
 Wants=network-online.target
@@ -169,7 +174,7 @@ Wants=network-online.target
 Type=oneshot
 RemainAfterExit=yes
 WorkingDirectory=${VISION_ROOT}
-ExecStart=/usr/bin/docker compose --env-file ${VISION_ROOT}/.env up -d postgres redis minio prometheus node-exporter grafana api
+ExecStart=/usr/bin/docker compose --env-file ${VISION_ROOT}/.env up -d ${core_services[*]}
 ExecStop=/usr/bin/docker compose --env-file ${VISION_ROOT}/.env stop
 TimeoutStartSec=0
 
@@ -192,9 +197,9 @@ validate_installation() {
 
 start_infrastructure() {
   [[ "$START_INFRA" == yes ]] || return 0
-  log 'Subindo infraestrutura base'
+  log 'Subindo plataforma VISION sem Wine/P2P'
   cd "$VISION_ROOT"
-  docker compose --env-file .env up -d postgres redis minio prometheus node-exporter grafana api
+  docker compose --env-file .env up -d "${core_services[@]}"
   if command -v nvidia-smi >/dev/null 2>&1 && nvidia-smi >/dev/null 2>&1; then docker compose --env-file .env --profile gpu up -d dcgm-exporter || warn 'DCGM exporter não iniciou; revisar driver/runtime NVIDIA'; fi
   docker compose --env-file .env ps
 }
@@ -209,14 +214,18 @@ main() {
   install_systemd_unit
   validate_installation
   start_infrastructure
-  log 'Instalação base concluída'
+  log 'Instalação da plataforma base concluída'
   printf 'Diretório: %s\n' "$VISION_ROOT"
   printf 'Validador: %s/scripts/validate_repo.sh\n' "$VISION_ROOT"
   printf 'API local: http://127.0.0.1:8080\n'
-  printf 'Prometheus local: http://127.0.0.1:9090\n'
-  printf 'Grafana local: http://127.0.0.1:3000\n'
-  printf 'MinIO Console local: http://127.0.0.1:9001\n'
-  printf 'P2P Intelbras: inserir somente SDK/binários autorizados em %s/secrets/vendor/intelbras/\n' "$VISION_ROOT"
+  printf 'Portal Admin: http://127.0.0.1:8083\n'
+  printf 'Portal Cliente: http://127.0.0.1:8084\n'
+  printf 'Ingestion API: http://127.0.0.1:8100\n'
+  printf 'Prometheus: http://127.0.0.1:9090\n'
+  printf 'Grafana: http://127.0.0.1:3000\n'
+  printf 'MinIO Console: http://127.0.0.1:9001\n'
+  printf 'Token bootstrap admin: %s/secrets/bootstrap-admin-token\n' "$VISION_ROOT"
+  printf 'Wine/P2P: fase final; habilitar explicitamente com INSTALL_WINE=yes e docker compose --profile p2p ...\n'
   if (( REBOOT_REQUIRED == 1 )); then warn 'Reboot necessário para concluir a instalação/ativação do driver NVIDIA. Após reiniciar, execute novamente este instalador.'; fi
 }
 

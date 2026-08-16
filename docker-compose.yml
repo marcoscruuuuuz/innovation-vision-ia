@@ -15,6 +15,10 @@ services:
       - ./architecture/migrations/002_p2p_runtime.sql:/docker-entrypoint-initdb.d/002-p2p-runtime.sql:ro
       - ./architecture/migrations/003_streambroker_failover.sql:/docker-entrypoint-initdb.d/003-streambroker-failover.sql:ro
       - ./architecture/migrations/004_reactive_ingestion.sql:/docker-entrypoint-initdb.d/004-reactive-ingestion.sql:ro
+      - ./architecture/migrations/005_core_pipeline.sql:/docker-entrypoint-initdb.d/005-core-pipeline.sql:ro
+      - ./architecture/migrations/006_portal_auth.sql:/docker-entrypoint-initdb.d/006-portal-auth.sql:ro
+      - ./architecture/migrations/007_client_rls.sql:/docker-entrypoint-initdb.d/007-client-rls.sql:ro
+      - ./architecture/migrations/008_alert_policies.sql:/docker-entrypoint-initdb.d/008-alert-policies.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-vision} -d ${POSTGRES_DB:-vision}"]
       interval: 10s
@@ -69,9 +73,16 @@ services:
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER:-vision}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-vision}
       TZ: ${TZ:-America/Sao_Paulo}
+      VISION_BOOTSTRAP_ADMIN_TOKEN: ${VISION_BOOTSTRAP_ADMIN_TOKEN:-}
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-visionminio}
+      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD}
+      MINIO_BUCKET: ${MINIO_EVIDENCE_BUCKET:-vision-evidence}
     depends_on:
       db-migrate:
         condition: service_completed_successfully
+      minio:
+        condition: service_started
     ports:
       - "127.0.0.1:${VISION_API_PORT:-8080}:8080"
     healthcheck:
@@ -92,7 +103,7 @@ services:
       MINIO_ENDPOINT: http://minio:9000
       MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-visionminio}
       MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD}
-      MINIO_INGESTION_BUCKET: ${MINIO_INGESTION_BUCKET:-vision-ingestion}
+      MINIO_INGESTION_BUCKET: ${MINIO_EVIDENCE_BUCKET:-vision-evidence}
       INGESTION_MAX_BODY_BYTES: ${INGESTION_MAX_BODY_BYTES:-12582912}
       INGESTION_MAX_SNAPSHOT_BYTES: ${INGESTION_MAX_SNAPSHOT_BYTES:-10485760}
       INGESTION_HMAC_KEYS_JSON: ${INGESTION_HMAC_KEYS_JSON:-{}}
@@ -112,7 +123,121 @@ services:
       retries: 10
     networks: [vision_backend]
 
+  detection-worker:
+    build:
+      context: ./detection
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-vision}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-vision}
+      REDIS_URL: redis://redis:6379/0
+      VISION_DETECTOR_BACKEND: ${VISION_DETECTOR_BACKEND:-disabled}
+      DETECTOR_HTTP_URL: ${DETECTOR_HTTP_URL:-}
+      DETECTOR_MODEL_KEY: ${DETECTOR_MODEL_KEY:-}
+      DETECTOR_MODEL_VERSION: ${DETECTOR_MODEL_VERSION:-}
+      DETECTOR_HTTP_TIMEOUT: ${DETECTOR_HTTP_TIMEOUT:-20}
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-visionminio}
+      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD}
+      MINIO_BUCKET: ${MINIO_EVIDENCE_BUCKET:-vision-evidence}
+    depends_on:
+      db-migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_started
+    networks: [vision_backend]
+
+  rule-worker:
+    build:
+      context: ./rules
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-vision}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-vision}
+      REDIS_URL: redis://redis:6379/0
+    depends_on:
+      db-migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    networks: [vision_backend]
+
+  certification-worker:
+    build:
+      context: ./certification
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-vision}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-vision}
+      REDIS_URL: redis://redis:6379/0
+    depends_on:
+      db-migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    networks: [vision_backend]
+
+  notification-worker:
+    build:
+      context: ./notifications
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-vision}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-vision}
+      REDIS_URL: redis://redis:6379/0
+      EVOLUTION_ENABLED: ${EVOLUTION_ENABLED:-false}
+      EVOLUTION_API_BASE_URL: ${EVOLUTION_API_BASE_URL:-}
+      EVOLUTION_API_KEY: ${EVOLUTION_API_KEY:-}
+      EVOLUTION_SEND_PATH_TEMPLATE: ${EVOLUTION_SEND_PATH_TEMPLATE:-/message/sendText/{instance}}
+      EVOLUTION_TIMEOUT: ${EVOLUTION_TIMEOUT:-15}
+    depends_on:
+      db-migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    networks: [vision_backend]
+
+  retention-worker:
+    build:
+      context: ./ops
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-vision}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-vision}
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-visionminio}
+      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD}
+      MINIO_BUCKET: ${MINIO_EVIDENCE_BUCKET:-vision-evidence}
+      VISION_RETENTION_DAYS: ${VISION_RETENTION_DAYS:-7}
+      RETENTION_INTERVAL_SECONDS: ${RETENTION_INTERVAL_SECONDS:-86400}
+    depends_on:
+      db-migrate:
+        condition: service_completed_successfully
+      minio:
+        condition: service_started
+    networks: [vision_backend]
+
+  portal-admin:
+    build:
+      context: ./portal-admin
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:${VISION_ADMIN_PORT:-8083}:8083"
+    networks: [vision_backend]
+
+  portal-client:
+    build:
+      context: ./portal-client
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:${VISION_CLIENT_PORT:-8084}:8084"
+    networks: [vision_backend]
+
   p2p-supervisor:
+    profiles: ["p2p"]
     build:
       context: ./p2p
     restart: unless-stopped
@@ -134,34 +259,21 @@ services:
       - ./secrets/vendor/intelbras:/vendor/intelbras:ro
     ports:
       - "127.0.0.1:${VISION_P2P_API_PORT:-8090}:8090"
-    healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8090/health', timeout=3)"]
-      interval: 15s
-      timeout: 5s
-      retries: 10
     networks: [vision_backend]
 
   stream-broker:
+    profiles: ["p2p"]
     build:
       context: ./p2p
     restart: unless-stopped
     command: ["uvicorn", "streambroker:app", "--host", "0.0.0.0", "--port", "8091"]
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER:-vision}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-vision}
-      STREAMBROKER_MIN_PROBE_FRAMES: ${STREAMBROKER_MIN_PROBE_FRAMES:-3}
-      STREAMBROKER_FAILURE_THRESHOLD: ${STREAMBROKER_FAILURE_THRESHOLD:-3}
-      STREAMBROKER_RECOVERY_THRESHOLD: ${STREAMBROKER_RECOVERY_THRESHOLD:-3}
-      STREAMBROKER_FAILOVER_COOLDOWN_SECONDS: ${STREAMBROKER_FAILOVER_COOLDOWN_SECONDS:-120}
     depends_on:
       db-migrate:
         condition: service_completed_successfully
     ports:
       - "127.0.0.1:${VISION_STREAMBROKER_PORT:-8091}:8091"
-    healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8091/health', timeout=3)"]
-      interval: 15s
-      timeout: 5s
-      retries: 10
     networks: [vision_backend]
 
   prometheus:
