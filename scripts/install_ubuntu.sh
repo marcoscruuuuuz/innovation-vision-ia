@@ -368,6 +368,37 @@ UNIT_EOF
   systemctl enable innovation-vision.service
 }
 
+install_t2u_control_service() {
+  [[ "$ENABLE_T2U_GATEWAY" == yes ]] || return 0
+  log 'Instalando controle protegido dos bridges T2U'
+  install -D -m 0750 -o root -g root \
+    "$VISION_ROOT/p2p/t2u_control_host.py" \
+    /usr/local/libexec/vision-ia-t2u-control
+  cat >/etc/systemd/system/vision-ia-t2u-control.service <<UNIT_EOF
+[Unit]
+Description=INNOVATION VISION IA - T2U bridge control
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+Group=root
+RuntimeDirectory=vision-ia
+RuntimeDirectoryMode=0700
+ExecStart=/usr/bin/python3 /usr/local/libexec/vision-ia-t2u-control --socket /run/vision-ia/t2u-control.sock --gateway-root ${T2U_GATEWAY_ROOT}
+Restart=always
+RestartSec=2
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
+UNIT_EOF
+  systemctl daemon-reload
+  systemctl enable --now vision-ia-t2u-control.service
+}
+
 start_stack() {
   [[ "$START_STACK" == yes ]] || return 0
   cd "$VISION_ROOT"
@@ -411,6 +442,10 @@ health_check() {
     curl -fsS http://127.0.0.1:8093/health | grep -q '"connected_tunnels":' \
       || die 'health check da captura T2U falhou'
     log 'OK: captura e sincronizacao T2U'
+    systemctl is-active --quiet vision-ia-t2u-control.service \
+      || die 'controle protegido de restart T2U nao esta em execucao'
+    [[ -S /run/vision-ia/t2u-control.sock ]] \
+      || die 'socket de controle T2U nao foi criado'
   fi
 }
 
@@ -454,6 +489,7 @@ main() {
   migrate_and_build
   provision_initial_admin
   install_systemd_unit
+  install_t2u_control_service
   start_stack
   health_check
   print_summary
