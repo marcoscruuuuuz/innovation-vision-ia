@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import hashlib
-import hmac
 import os
 import secrets
 from datetime import date, datetime, time, timezone
@@ -14,7 +13,6 @@ from psycopg.rows import dict_row
 from psycopg_pool import ConnectionPool
 
 DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://vision:vision@postgres:5432/vision")
-BOOTSTRAP_ADMIN_TOKEN = os.getenv("VISION_BOOTSTRAP_ADMIN_TOKEN", "")
 pool = ConnectionPool(conninfo=DATABASE_URL, min_size=1, max_size=10, kwargs={"row_factory": dict_row})
 router = APIRouter()
 
@@ -67,8 +65,6 @@ def get_principal(authorization: str | None):
     if not authorization or not authorization.lower().startswith("bearer "):
         raise HTTPException(status_code=401, detail="Bearer token required")
     token = authorization.split(" ", 1)[1].strip()
-    if BOOTSTRAP_ADMIN_TOKEN and hmac.compare_digest(token, BOOTSTRAP_ADMIN_TOKEN):
-        return {"bootstrap": True, "role": "admin", "scopes": ["admin:*", "client:read"], "user_id": None}
     with pool.connection() as conn, conn.cursor() as cur:
         cur.execute(
             """
@@ -89,22 +85,19 @@ def get_principal(authorization: str | None):
 
 def require_admin(authorization: str | None):
     p = get_principal(authorization)
-    if p["role"] != "admin" or (not p.get("bootstrap") and "admin:*" not in p["scopes"]):
+    if p["role"] != "admin" or "admin:*" not in p["scopes"]:
         raise HTTPException(status_code=403, detail="admin scope required")
     return p
 
 
 def require_client_read(authorization: str | None):
     p = get_principal(authorization)
-    if not p.get("bootstrap") and "client:read" not in p["scopes"] and "admin:*" not in p["scopes"]:
+    if "client:read" not in p["scopes"] and "admin:*" not in p["scopes"]:
         raise HTTPException(status_code=403, detail="client:read scope required")
     return p
 
 
 def tenant_ids(cur, principal) -> list[UUID]:
-    if principal.get("bootstrap"):
-        cur.execute("SELECT id FROM condominiums WHERE active=true")
-        return [r["id"] for r in cur.fetchall()]
     cur.execute("SELECT condominium_id FROM user_condominiums WHERE user_id=%s", (principal["user_id"],))
     return [r["condominium_id"] for r in cur.fetchall()]
 
@@ -190,7 +183,7 @@ def save_rule(payload: RuleConfig, authorization: str | None = Header(default=No
         version_row = cur.fetchone()
         cur.execute(
             "INSERT INTO audit_logs(actor_type,actor_id,action,object_type,object_id,metadata) VALUES ('USER',%s,'rule.version.create','event_rule',%s,jsonb_build_object('version',%s,'status',%s))",
-            (str(principal.get("user_id")) if principal.get("user_id") else "bootstrap", str(rule["id"]), version, certification_status),
+            (str(principal["user_id"]), str(rule["id"]), version, certification_status),
         )
         conn.commit()
         return {"rule": rule, "version": version_row}

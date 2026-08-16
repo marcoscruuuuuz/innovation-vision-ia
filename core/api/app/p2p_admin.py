@@ -92,7 +92,7 @@ def failover_action(dvr_id: UUID, payload: FailoverAction, authorization: str | 
         with pool.connection() as conn, conn.cursor() as cur:
             cur.execute(
                 "INSERT INTO audit_logs(actor_type,actor_id,action,object_type,object_id,metadata) VALUES ('USER',%s,'p2p.failover.request','dvr',%s,%s::jsonb)",
-                (str(principal.get("user_id") or "bootstrap"), str(dvr_id), json.dumps({"reason": payload.reason})),
+                (str(principal["user_id"]), str(dvr_id), json.dumps({"reason": payload.reason})),
             )
             conn.commit()
     return result
