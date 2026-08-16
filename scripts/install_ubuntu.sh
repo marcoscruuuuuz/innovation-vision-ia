@@ -165,6 +165,14 @@ install_nvidia() {
   systemctl restart docker
 }
 
+fix_application_ownership() {
+  # Nunca altera ownership de data/postgres, data/redis ou data/minio.
+  # Esses diretórios podem ter UIDs/GIDs internos definidos pelos containers.
+  chown "$VISION_USER:$VISION_USER" "$VISION_ROOT"
+  find "$VISION_ROOT" -mindepth 1 -maxdepth 1 ! -name data \
+    -exec chown -R "$VISION_USER:$VISION_USER" {} +
+}
+
 backup_current_install() {
   [[ "$BACKUP_BEFORE_UPDATE" == yes ]] || return 0
   [[ -d "$VISION_ROOT" ]] || return 0
@@ -216,7 +224,7 @@ install_or_update_repository() {
       --exclude='backups/***' \
       --exclude='secrets/***' \
       "$SOURCE_DIR/" "$VISION_ROOT/"
-    chown -R "$VISION_USER:$VISION_USER" "$VISION_ROOT"
+    fix_application_ownership
   else
     log "Clonando ${REPO_URL}"
     as_user git clone --branch "$REPO_BRANCH" "$REPO_URL" "$VISION_ROOT" || die 'falha no clone. Para repositorio privado, autentique o GitHub/SSH e execute novamente.'
@@ -226,7 +234,7 @@ install_or_update_repository() {
     "$VISION_ROOT/data/postgres" "$VISION_ROOT/data/redis" "$VISION_ROOT/data/minio" \
     "$VISION_ROOT/models" "$VISION_ROOT/logs" "$VISION_ROOT/backups" \
     "$VISION_ROOT/secrets/vendor/intelbras" "$VISION_ROOT/secrets/cameras" "$VISION_ROOT/secrets/evolution"
-  chown -R "$VISION_USER:$VISION_USER" "$VISION_ROOT"
+  fix_application_ownership
 }
 
 prepare_environment() {
@@ -247,7 +255,7 @@ prepare_environment() {
   chmod 0600 "$VISION_ROOT/.env"
   find "$VISION_ROOT/secrets" -type d -exec chmod 0750 {} +
   find "$VISION_ROOT/secrets" -type f -exec chmod 0600 {} +
-  chown -R "$VISION_USER:$VISION_USER" "$VISION_ROOT"
+  fix_application_ownership
 }
 
 validate_repository() {
