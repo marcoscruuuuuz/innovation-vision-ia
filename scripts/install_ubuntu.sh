@@ -10,7 +10,6 @@ set -Eeuo pipefail
 # O script aceita execucao sem root e se eleva automaticamente via sudo.
 # Instalacao canonica: /home/innovation/innovation-vision-ia
 
-ORIGINAL_USER="${SUDO_USER:-${USER:-innovation}}"
 VISION_USER="${VISION_USER:-innovation}"
 VISION_HOME="${VISION_HOME:-/home/${VISION_USER}}"
 VISION_ROOT="${VISION_ROOT:-${VISION_HOME}/innovation-vision-ia}"
