@@ -54,7 +54,8 @@ jobs:
       - name: Seed password login fixture
         run: |
           HASH=$(python3 -c "import sys;sys.path.insert(0,'core/api');from app.auth_utils import hash_password;print(hash_password('TestPass123!'))")
-          docker compose exec -T postgres psql -U vision -d vision -v ON_ERROR_STOP=1 -v hash="$HASH" -c "INSERT INTO users(username,password_hash,role,active) VALUES ('ci-admin', :'hash', 'admin', true) ON CONFLICT(username) DO UPDATE SET password_hash=excluded.password_hash,role='admin',active=true;"
+          SAFE_HASH=${HASH//\'/\'\'}
+          printf "INSERT INTO users(username,password_hash,role,active) VALUES ('ci-admin','%s','admin',true) ON CONFLICT(username) DO UPDATE SET password_hash=excluded.password_hash,role='admin',active=true;\n" "$SAFE_HASH" | docker compose exec -T postgres psql -U vision -d vision -v ON_ERROR_STOP=1
       - name: Smoke core HTTP services
         run: |
           wait_url() {
