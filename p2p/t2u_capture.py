@@ -4,6 +4,7 @@ import ctypes
 import json
 import os
 import subprocess
+import socket
 import tempfile
 import threading
 import time
@@ -22,6 +23,7 @@ DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://vision:vision@postgres:54
 GATEWAY_ROOT = Path(os.getenv("T2U_GATEWAY_ROOT", "/gateway"))
 SDK_LIBRARY = Path(os.getenv("T2U_SDK_LIBRARY", str(GATEWAY_ROOT / "sdk/bin/libdhnetsdk.so")))
 GATEWAY_HOST = os.getenv("T2U_GATEWAY_HOST", "host.docker.internal")
+CONTROL_SOCKET = os.getenv("T2U_CONTROL_SOCKET", "/host-control/t2u-control.sock")
 CAPTURE_SECONDS = max(2.0, min(float(os.getenv("T2U_CAPTURE_SECONDS", "4")), 12.0))
 CAPTURE_TIMEOUT = max(10.0, float(os.getenv("T2U_CAPTURE_TIMEOUT", "25")))
 SDK_LOCK = threading.Lock()
@@ -39,6 +41,7 @@ class DeviceBinding:
     local_port: int | None
     connected: bool
     updated_at: str | None
+    bridge_started_at: str | None
     username: str | None
     password: str | None
 
@@ -104,9 +107,10 @@ class T2UGateway:
                 if isinstance(serial, str) and serial in serial_to_name:
                     devices[device_id] = (slug, serial_to_name[serial])
 
-        statuses: dict[int, tuple[int | None, bool, str | None]] = {}
+        statuses: dict[int, tuple[int | None, bool, str | None, str | None]] = {}
         for status_path in self.status_dir.glob("bridge-status-*.json"):
             status = _read_json(status_path)
+            bridge_started_at = str(status.get("StartedAt")) if status.get("StartedAt") else None
             for device in status.get("Devices", []):
                 if not isinstance(device, dict):
                     continue
@@ -123,6 +127,7 @@ class T2UGateway:
                     local_port,
                     device.get("State") == "connected",
                     str(device.get("UpdatedAt")) if device.get("UpdatedAt") else None,
+                    bridge_started_at,
                 )
 
         credentials: dict[int, tuple[str, str]] = {}
@@ -140,7 +145,7 @@ class T2UGateway:
 
         bindings: list[DeviceBinding] = []
         for device_id, (slug, dvr_name) in devices.items():
-            local_port, connected, updated_at = statuses.get(device_id, (None, False, None))
+            local_port, connected, updated_at, bridge_started_at = statuses.get(device_id, (None, False, None, None))
             credential = credentials.get(device_id)
             bindings.append(
                 DeviceBinding(
@@ -150,34 +155,82 @@ class T2UGateway:
                     local_port=local_port,
                     connected=connected,
                     updated_at=updated_at,
+                    bridge_started_at=bridge_started_at,
                     username=credential[0] if credential else None,
                     password=credential[1] if credential else None,
                 )
             )
         return sorted(bindings, key=lambda item: item.dvr_name)
 
-    def binding_for_camera(self, camera_id: UUID) -> DeviceBinding:
+    def binding_for_dvr(self, dvr_id: UUID, *, require_credentials: bool = False) -> DeviceBinding:
         with db() as conn, conn.cursor() as cur:
             cur.execute(
                 """
                 SELECT d.name
-                  FROM cameras c
-                  JOIN dvrs d ON d.id=c.dvr_id
-                 WHERE c.id=%s AND c.enabled=true AND d.enabled=true
+                  FROM dvrs d
+                 WHERE d.id=%s AND d.enabled=true
                 """,
-                (camera_id,),
+                (dvr_id,),
             )
             row = cur.fetchone()
         if not row:
-            raise GatewayError("camera is not available")
+            raise GatewayError("DVR is not available")
         binding = next((item for item in self.bindings() if item.dvr_name == row["name"]), None)
         if not binding:
             raise GatewayError("DVR is not mapped to the T2U gateway")
         if not binding.connected or not binding.local_port:
             raise GatewayError("P2P gateway has no connected tunnel for this DVR")
-        if not binding.username or not binding.password:
+        if require_credentials and (not binding.username or not binding.password):
             raise GatewayError("P2P gateway credentials are unavailable for this DVR")
         return binding
+
+    def binding_for_camera(self, camera_id: UUID) -> DeviceBinding:
+        with db() as conn, conn.cursor() as cur:
+            cur.execute("SELECT dvr_id FROM cameras WHERE id=%s AND enabled=true", (camera_id,))
+            camera = cur.fetchone()
+        if not camera:
+            raise GatewayError("camera is not available")
+        return self.binding_for_dvr(camera["dvr_id"], require_credentials=True)
+
+    def rotate_dvr_tunnel(self, dvr_id: UUID) -> dict[str, Any]:
+        binding = self.binding_for_dvr(dvr_id)
+        request = json.dumps({"action": "restart", "bridge": binding.bridge_slug}).encode("utf-8")
+        try:
+            with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
+                client.settimeout(90)
+                client.connect(CONTROL_SOCKET)
+                client.sendall(request)
+                response = bytearray()
+                while True:
+                    chunk = client.recv(65536)
+                    if not chunk:
+                        break
+                    response.extend(chunk)
+        except OSError as exc:
+            raise GatewayError("T2U bridge control service is unavailable") from exc
+        try:
+            result = json.loads(response.decode("utf-8"))
+        except json.JSONDecodeError as exc:
+            raise GatewayError("T2U bridge control service returned invalid data") from exc
+        if not isinstance(result, dict) or result.get("ok") is not True:
+            raise GatewayError(str(result.get("error") if isinstance(result, dict) else "T2U bridge restart failed"))
+
+        deadline = time.monotonic() + 75
+        while time.monotonic() < deadline:
+            refreshed = next(
+                (item for item in self.bindings(include_credentials=False) if item.device_id == binding.device_id),
+                None,
+            )
+            if refreshed and refreshed.connected and refreshed.local_port:
+                return {
+                    "status": "RECONNECTED",
+                    "bridge": binding.bridge_slug,
+                    "device_id": binding.device_id,
+                    "sdk_local_port": refreshed.local_port,
+                    "bridge_started_at": refreshed.bridge_started_at,
+                }
+            time.sleep(2)
+        raise GatewayError("T2U bridge restart completed but the tunnel did not reconnect in time")
 
     def _sdk_client(self) -> ctypes.CDLL:
         if self._sdk is not None:
@@ -381,4 +434,12 @@ def snapshot(camera_id: UUID) -> Response:
         media_type="image/jpeg",
         headers={"Cache-Control": "no-store, no-cache, must-revalidate"},
     )
+
+
+@app.post("/v1/dvrs/{dvr_id}/rotate")
+def rotate_tunnel(dvr_id: UUID) -> dict[str, Any]:
+    try:
+        return gateway.rotate_dvr_tunnel(dvr_id)
+    except GatewayError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
