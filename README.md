@@ -23,6 +23,7 @@ O control plane final Intelbras P2P/Wine também está implementado, porém isol
 - Retenção auditada de 7 dias.
 - Notification Queue e adapter Evolution configurável.
 - P2P Supervisor, Port Registry, StreamBroker e Failover Orchestrator transacional.
+- Watchdog P2P automático com hysteresis/cooldown e disparo do failover.
 - Painel P2P administrativo com planejamento e botão de troca emergencial de túnel.
 - PostgreSQL, Redis, MinIO, Prometheus, Grafana e DCGM opcional.
 - Instalador Ubuntu único e CI com build/migrations/smoke tests.
@@ -60,7 +61,7 @@ O stack padrão continua sem Wine/P2P. O código final fica atrás do profile `p
 
 ```bash
 INSTALL_WINE=yes sudo -E bash scripts/install_ubuntu.sh
-docker compose --profile p2p up -d p2p-supervisor stream-broker failover-orchestrator
+docker compose --profile p2p up -d p2p-supervisor stream-broker failover-orchestrator p2p-watchdog
 ```
 
 Serviços locais:
@@ -68,8 +69,9 @@ Serviços locais:
 - P2P Supervisor: `127.0.0.1:8090`
 - StreamBroker: `127.0.0.1:8091`
 - Failover Orchestrator: `127.0.0.1:8092`
+- Watchdog: serviço interno, sem porta publicada.
 
-`INTELBRAS_VENDOR_ADAPTER_ENABLED=false` permanece como default. Sem o executável autorizado, a abertura real de sessão é bloqueada. Uma sessão só pode virar `ACTIVE` após probe de frames reais; o failover usa make-before-break, verificação de todas as rotas e rollback explícito.
+`INTELBRAS_VENDOR_ADAPTER_ENABLED=false` permanece como default. Sem o executável autorizado, a abertura real de sessão é bloqueada e o watchdog não dispara alterações. Uma sessão só pode virar `ACTIVE` após probe de frames reais. O watchdog mede saúde do túnel; depois do limiar configurado de falhas o StreamBroker aplica hysteresis/cooldown e o Failover Orchestrator executa make-before-break, valida todas as rotas e faz rollback explícito em qualquer falha.
 
 Nenhum SDK/DLL/EXE Intelbras proprietário é versionado neste repositório.
 
