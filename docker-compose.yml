@@ -14,6 +14,7 @@ services:
       - ./architecture/schema.sql:/docker-entrypoint-initdb.d/001-schema.sql:ro
       - ./architecture/migrations/002_p2p_runtime.sql:/docker-entrypoint-initdb.d/002-p2p-runtime.sql:ro
       - ./architecture/migrations/003_streambroker_failover.sql:/docker-entrypoint-initdb.d/003-streambroker-failover.sql:ro
+      - ./architecture/migrations/004_failover_operations.sql:/docker-entrypoint-initdb.d/004-failover-operations.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-vision} -d ${POSTGRES_DB:-vision}"]
       interval: 10s
@@ -127,6 +128,30 @@ services:
       - "127.0.0.1:${VISION_STREAMBROKER_PORT:-8091}:8091"
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8091/health', timeout=3)"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+    networks: [vision_backend]
+
+  failover-orchestrator:
+    build:
+      context: ./p2p
+    restart: unless-stopped
+    command: ["uvicorn", "failover_orchestrator:app", "--host", "0.0.0.0", "--port", "8092"]
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-vision}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-vision}
+      P2P_SUPERVISOR_URL: http://p2p-supervisor:8090
+      STREAM_BROKER_URL: http://stream-broker:8091
+      FAILOVER_REQUEST_TIMEOUT: ${FAILOVER_REQUEST_TIMEOUT:-45}
+    depends_on:
+      p2p-supervisor:
+        condition: service_healthy
+      stream-broker:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:${VISION_FAILOVER_PORT:-8092}:8092"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8092/health', timeout=3)"]
       interval: 15s
       timeout: 5s
       retries: 10
