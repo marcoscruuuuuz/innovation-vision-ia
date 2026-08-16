@@ -49,8 +49,42 @@ BEGIN
     IF event_name = 'porta_aberta_bloco' THEN
         NEW.parameters := NEW.parameters || jsonb_build_object(
             'open_persistence_seconds', 15,
+            'duration_seconds', 15,
             'capture_snapshot', true,
             'capture_mini_clip', true
+        );
+    ELSIF event_name = 'face_detectada' THEN
+        NEW.parameters := NEW.parameters || jsonb_build_object('classes', jsonb_build_array('face'));
+    ELSIF event_name = 'area_janelas_apartamentos' THEN
+        NEW.parameters := NEW.parameters || jsonb_build_object('classes', jsonb_build_array('person'));
+    ELSIF event_name = 'pessoa_portao_veicular' THEN
+        NEW.parameters := NEW.parameters || jsonb_build_object('classes', jsonb_build_array('person'));
+    ELSIF event_name = 'entrada_vacuo' THEN
+        NEW.parameters := NEW.parameters || jsonb_build_object(
+            'classes', jsonb_build_array('car','truck','bus','motorcycle','vehicle'),
+            'crossing_order','forward',
+            'vacuum_max_gap_seconds',3
+        );
+    ELSIF event_name = 'saida_vacuo' THEN
+        NEW.parameters := NEW.parameters || jsonb_build_object(
+            'classes', jsonb_build_array('car','truck','bus','motorcycle','vehicle'),
+            'crossing_order','reverse',
+            'vacuum_max_gap_seconds',3
+        );
+    ELSIF event_name = 'veiculo_area_proibida' THEN
+        NEW.parameters := NEW.parameters || jsonb_build_object(
+            'classes', jsonb_build_array('car','truck','bus','motorcycle','vehicle'),
+            'duration_seconds',20,
+            'max_stationary_displacement',0.04
+        );
+    ELSIF event_name = 'veiculo_contramao' THEN
+        NEW.parameters := NEW.parameters || jsonb_build_object(
+            'classes', jsonb_build_array('car','truck','bus','motorcycle','vehicle')
+        );
+    ELSIF event_name = 'movimentacao_apos_22h' THEN
+        NEW.parameters := NEW.parameters || jsonb_build_object(
+            'schedule','22:00-06:00',
+            'timezone','America/Sao_Paulo'
         );
     END IF;
 
