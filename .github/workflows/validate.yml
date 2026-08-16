@@ -25,20 +25,24 @@ jobs:
           python3 -m compileall -q notifications
           python3 -m compileall -q ops
           python3 -m compileall -q p2p
-      - name: Validate Compose and deferred P2P profile
+      - name: Validate Compose profiles
         run: |
           docker compose config --quiet
           ! docker compose config --services | grep -qx 'p2p-supervisor'
           ! docker compose config --services | grep -qx 'stream-broker'
+          ! docker compose config --services | grep -qx 'failover-orchestrator'
           docker compose --profile p2p config --services | grep -qx 'p2p-supervisor'
           docker compose --profile p2p config --services | grep -qx 'stream-broker'
+          docker compose --profile p2p config --services | grep -qx 'failover-orchestrator'
       - name: Build core application images
         run: docker compose build api ingestion-api detection-worker rule-worker certification-worker notification-worker retention-worker portal-admin portal-client
+      - name: Build final P2P profile images
+        run: docker compose --profile p2p build p2p-supervisor stream-broker failover-orchestrator
       - name: Validate migrations on PostgreSQL
         run: |
           docker compose up -d postgres
           docker compose run --rm db-migrate
-          docker compose exec -T postgres psql -U vision -d vision -v ON_ERROR_STOP=1 -c "SELECT to_regclass('public.ingestion_events'), to_regclass('public.detection_results'), to_regclass('public.rule_evaluations'), to_regclass('public.event_confidence_policies'), to_regclass('public.user_api_tokens'), to_regclass('public.retention_job_runs'), to_regclass('public.alert_policies');"
+          docker compose exec -T postgres psql -U vision -d vision -v ON_ERROR_STOP=1 -c "SELECT to_regclass('public.ingestion_events'), to_regclass('public.detection_results'), to_regclass('public.rule_evaluations'), to_regclass('public.event_confidence_policies'), to_regclass('public.user_api_tokens'), to_regclass('public.retention_job_runs'), to_regclass('public.alert_policies'), to_regclass('public.p2p_failover_operations');"
           docker compose exec -T postgres psql -U vision -d vision -v ON_ERROR_STOP=1 -c "SELECT rolname FROM pg_roles WHERE rolname='vision_portal';"
       - name: Smoke core HTTP services
         run: |
@@ -50,3 +54,10 @@ jobs:
           curl -fsS http://127.0.0.1:8083/ >/dev/null
           curl -fsS http://127.0.0.1:8083/rules.html >/dev/null
           curl -fsS http://127.0.0.1:8084/ >/dev/null
+      - name: Smoke final P2P control plane with vendor disabled
+        run: |
+          docker compose --profile p2p up -d p2p-supervisor stream-broker failover-orchestrator
+          for i in $(seq 1 30); do curl -fsS http://127.0.0.1:8090/health >/dev/null && break; sleep 2; done
+          curl -fsS http://127.0.0.1:8090/health | grep -q 'vendor_adapter'
+          curl -fsS http://127.0.0.1:8091/health
+          curl -fsS http://127.0.0.1:8092/health
