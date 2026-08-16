@@ -16,8 +16,10 @@ jobs:
       - name: Validate repository
         run: bash scripts/validate_repo.sh
       - name: Compile Python
-        run: python3 -m compileall -q core/api/app
+        run: |
+          python3 -m compileall -q core/api/app
+          python3 -m compileall -q p2p
       - name: Validate Compose
         run: docker compose config --quiet
-      - name: Build API image
-        run: docker compose build api
+      - name: Build application images
+        run: docker compose build api p2p-supervisor
