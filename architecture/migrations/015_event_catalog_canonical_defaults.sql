@@ -11,25 +11,25 @@ BEGIN
     SELECT event_type INTO event_name FROM event_rules WHERE id = NEW.event_rule_id;
 
     engine_name := CASE event_name
-        WHEN 'porta_aberta_bloco', 'porta_bloco_aberta', 'porta_manutencao' THEN 'door_structural_change_temporal'
-        WHEN 'linha_perimetral', 'linha_perimetral_cerca_eletrica', 'linha_perimetral_disparo', 'linha_velocidade',
-             'entrada_vacuo', 'saida_vacuo' THEN 'tracker_temporal'
-        WHEN 'pessoa_portao_veicular' THEN 'person_tracker'
-        WHEN 'cachorro_solto', 'animais_pets', 'muro_condominio', 'area_proibida',
-             'pessoa_bicicleta_area_comum' THEN 'detector_tracker_temporal'
-        WHEN 'cachorro_fazendo_fezes', 'morador_nao_recolheu_fezes', 'possiveis_fezes' THEN 'detector_pose_temporal_vlm_review'
-        WHEN 'crianca_bicicleta_area_comum' THEN 'child_classifier_object_association'
-        WHEN 'crianca_correndo_area_comum' THEN 'child_classifier_pose_tracker'
-        WHEN 'veiculo_area_proibida', 'veiculo_parado_irregular' THEN 'vehicle_tracker_temporal'
-        WHEN 'veiculo_contramao' THEN 'vehicle_tracker_direction'
-        WHEN 'movimentacao_apos_22h', 'pessoa_fora_horario_22h' THEN 'motion_scene_change_detector'
-        WHEN 'bola_fora_quadra', 'criancas_jogando_bola' THEN 'child_person_ball_association'
-        WHEN 'crianca_soltando_pipa', 'crianca_com_pipa' THEN 'child_person_kite_temporal'
-        WHEN 'placa_detectada' THEN 'vehicle_plate_detector_ocr_temporal_vote'
-        WHEN 'face_detectada' THEN 'face_detector'
-        WHEN 'porteiro_dormindo', 'possivel_porteiro_dormindo' THEN 'person_pose_inactivity'
-        WHEN 'porteiro_fora_posto' THEN 'person_absence_temporal'
-        WHEN 'lixo_no_chao' THEN 'person_object_abandonment'
+        WHEN event_name IN ('porta_aberta_bloco', 'porta_bloco_aberta', 'porta_manutencao') THEN 'door_structural_change_temporal'
+        WHEN event_name IN ('linha_perimetral', 'linha_perimetral_cerca_eletrica', 'linha_perimetral_disparo', 'linha_velocidade',
+             'entrada_vacuo', 'saida_vacuo') THEN 'tracker_temporal'
+        WHEN event_name = 'pessoa_portao_veicular' THEN 'person_tracker'
+        WHEN event_name IN ('cachorro_solto', 'animais_pets', 'muro_condominio', 'area_proibida',
+             'pessoa_bicicleta_area_comum') THEN 'detector_tracker_temporal'
+        WHEN event_name IN ('cachorro_fazendo_fezes', 'morador_nao_recolheu_fezes', 'possiveis_fezes') THEN 'detector_pose_temporal_vlm_review'
+        WHEN event_name = 'crianca_bicicleta_area_comum' THEN 'child_classifier_object_association'
+        WHEN event_name = 'crianca_correndo_area_comum' THEN 'child_classifier_pose_tracker'
+        WHEN event_name IN ('veiculo_area_proibida', 'veiculo_parado_irregular') THEN 'vehicle_tracker_temporal'
+        WHEN event_name = 'veiculo_contramao' THEN 'vehicle_tracker_direction'
+        WHEN event_name IN ('movimentacao_apos_22h', 'pessoa_fora_horario_22h') THEN 'motion_scene_change_detector'
+        WHEN event_name IN ('bola_fora_quadra', 'criancas_jogando_bola') THEN 'child_person_ball_association'
+        WHEN event_name IN ('crianca_soltando_pipa', 'crianca_com_pipa') THEN 'child_person_kite_temporal'
+        WHEN event_name = 'placa_detectada' THEN 'vehicle_plate_detector_ocr_temporal_vote'
+        WHEN event_name = 'face_detectada' THEN 'face_detector'
+        WHEN event_name IN ('porteiro_dormindo', 'possivel_porteiro_dormindo') THEN 'person_pose_inactivity'
+        WHEN event_name = 'porteiro_fora_posto' THEN 'person_absence_temporal'
+        WHEN event_name = 'lixo_no_chao' THEN 'person_object_abandonment'
         ELSE 'snapshot_detector'
     END;
 
