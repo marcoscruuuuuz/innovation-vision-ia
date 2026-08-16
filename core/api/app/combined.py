@@ -1,8 +1,10 @@
 from .main import app
 from . import platform as platform_module
 from .platform_security import secure_tenant_ids
+from .legacy_security import legacy_admin_guard
 
 platform_module.tenant_ids = secure_tenant_ids
+app.middleware("http")(legacy_admin_guard)
 
 from .platform import router as platform_router
 from .media import router as media_router
