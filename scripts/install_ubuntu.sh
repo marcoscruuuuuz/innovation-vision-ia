@@ -159,7 +159,7 @@ install_repository() {
   chmod 0600 "$VISION_ROOT/.env"
 }
 
-core_services=(postgres redis minio prometheus node-exporter grafana api ingestion-api detection-worker rule-worker certification-worker retention-worker portal-admin portal-client)
+core_services=(postgres redis minio prometheus node-exporter grafana api ingestion-api detection-worker rule-worker certification-worker notification-worker retention-worker portal-admin portal-client)
 
 install_systemd_unit() {
   log 'Instalando unidade systemd da plataforma VISION'
