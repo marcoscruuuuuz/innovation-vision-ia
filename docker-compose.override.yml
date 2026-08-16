@@ -11,6 +11,7 @@ services:
 
   clip-builder:
     build: {context: ./evidence}
+    pull_policy: build
     restart: unless-stopped
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER:-vision}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-vision}
@@ -27,3 +28,7 @@ services:
       db-migrate: {condition: service_completed_successfully}
       minio: {condition: service_started}
     networks: [vision_backend]
+
+  portal-admin:
+    depends_on:
+      clip-builder: {condition: service_started}
