@@ -73,7 +73,11 @@ def _container_reachable_uri(uri: str) -> str:
 
 
 def _mjpeg_frames(uri: str, fps: int, quality: int) -> Iterator[bytes]:
-    cmd = [FFMPEG_BIN,"-hide_banner","-loglevel","error","-rtsp_transport","tcp","-stimeout","5000000","-i",uri,"-an","-vf",f"fps={fps}","-q:v",str(quality),"-f","mjpeg","pipe:1"]
+    cmd = [
+        FFMPEG_BIN, "-hide_banner", "-loglevel", "error", "-rtsp_transport", "tcp",
+        "-rw_timeout", "5000000", "-i", uri, "-an", "-vf", f"fps={fps}",
+        "-q:v", str(quality), "-f", "mjpeg", "pipe:1",
+    ]
     proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, bufsize=0)
     buffer = bytearray()
     try:
@@ -87,26 +91,35 @@ def _mjpeg_frames(uri: str, fps: int, quality: int) -> Iterator[bytes]:
             while True:
                 start = buffer.find(b"\xff\xd8")
                 if start < 0:
-                    if len(buffer) > 1048576: del buffer[:-2]
+                    if len(buffer) > 1048576:
+                        del buffer[:-2]
                     break
                 end = buffer.find(b"\xff\xd9", start + 2)
                 if end < 0:
-                    if start > 0: del buffer[:start]
+                    if start > 0:
+                        del buffer[:start]
                     break
-                frame = bytes(buffer[start:end+2]); del buffer[:end+2]
+                frame = bytes(buffer[start:end+2])
+                del buffer[:end+2]
                 yield b"--frame\r\nContent-Type: image/jpeg\r\nCache-Control: no-store\r\n\r\n" + frame + b"\r\n"
     finally:
         if proc.poll() is None:
             proc.terminate()
-            try: proc.wait(timeout=2)
-            except subprocess.TimeoutExpired: proc.kill()
+            try:
+                proc.wait(timeout=2)
+            except subprocess.TimeoutExpired:
+                proc.kill()
 
 
 @router.get("/api/v1/admin/cameras/{camera_id}/live/status")
 def live_status(camera_id: UUID, authorization: str | None = Header(default=None)):
     require_admin(authorization)
     row = _route_for_camera(camera_id)
-    return {"camera_id":row["id"],"name":row["name"],"health_state":row["health_state"],"last_frame_at":row["last_frame_at"],"route_source_type":row["source_type"],"route_last_frame_at":row["route_last_frame_at"],"has_live_route":bool(row["local_uri"])}
+    return {
+        "camera_id": row["id"], "name": row["name"], "health_state": row["health_state"],
+        "last_frame_at": row["last_frame_at"], "route_source_type": row["source_type"],
+        "route_last_frame_at": row["route_last_frame_at"], "has_live_route": bool(row["local_uri"]),
+    }
 
 
 @router.get("/api/v1/admin/cameras/{camera_id}/live.mjpeg")
@@ -117,4 +130,8 @@ def live_mjpeg(camera_id: UUID, token: str | None = Query(default=None), authori
     if not row["local_uri"]:
         raise HTTPException(status_code=409, detail="camera has no active stream route")
     uri = _container_reachable_uri(row["local_uri"])
-    return StreamingResponse(_mjpeg_frames(uri,fps=fps,quality=quality),media_type="multipart/x-mixed-replace; boundary=frame",headers={"Cache-Control":"no-store, no-cache, must-revalidate"})
+    return StreamingResponse(
+        _mjpeg_frames(uri, fps=fps, quality=quality),
+        media_type="multipart/x-mixed-replace; boundary=frame",
+        headers={"Cache-Control": "no-store, no-cache, must-revalidate"},
+    )
