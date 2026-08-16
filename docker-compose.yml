@@ -17,6 +17,8 @@ services:
       - ./architecture/migrations/004_reactive_ingestion.sql:/docker-entrypoint-initdb.d/004-reactive-ingestion.sql:ro
       - ./architecture/migrations/005_core_pipeline.sql:/docker-entrypoint-initdb.d/005-core-pipeline.sql:ro
       - ./architecture/migrations/006_portal_auth.sql:/docker-entrypoint-initdb.d/006-portal-auth.sql:ro
+      - ./architecture/migrations/007_client_rls.sql:/docker-entrypoint-initdb.d/007-client-rls.sql:ro
+      - ./architecture/migrations/008_alert_policies.sql:/docker-entrypoint-initdb.d/008-alert-policies.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-vision} -d ${POSTGRES_DB:-vision}"]
       interval: 10s
@@ -167,6 +169,25 @@ services:
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER:-vision}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-vision}
       REDIS_URL: redis://redis:6379/0
+    depends_on:
+      db-migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    networks: [vision_backend]
+
+  notification-worker:
+    build:
+      context: ./notifications
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-vision}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-vision}
+      REDIS_URL: redis://redis:6379/0
+      EVOLUTION_ENABLED: ${EVOLUTION_ENABLED:-false}
+      EVOLUTION_API_BASE_URL: ${EVOLUTION_API_BASE_URL:-}
+      EVOLUTION_API_KEY: ${EVOLUTION_API_KEY:-}
+      EVOLUTION_SEND_PATH_TEMPLATE: ${EVOLUTION_SEND_PATH_TEMPLATE:-/message/sendText/{instance}}
+      EVOLUTION_TIMEOUT: ${EVOLUTION_TIMEOUT:-15}
     depends_on:
       db-migrate:
         condition: service_completed_successfully
