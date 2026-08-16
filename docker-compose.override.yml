@@ -1,0 +1,10 @@
+services:
+  api:
+    environment:
+      PROMETHEUS_URL: http://prometheus:9090
+      VISION_EVENT_CATALOG: /app/config/event_catalog.yaml
+      VISION_HOST_GATEWAY: host.docker.internal
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ./configs/event_catalog.yaml:/app/config/event_catalog.yaml:ro
