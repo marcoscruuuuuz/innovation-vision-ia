@@ -15,7 +15,7 @@ P2P_SUPERVISOR_URL = os.getenv("P2P_SUPERVISOR_URL", "http://p2p-supervisor:8090
 STREAM_BROKER_URL = os.getenv("STREAM_BROKER_URL", "http://stream-broker:8091")
 REQUEST_TIMEOUT = float(os.getenv("FAILOVER_REQUEST_TIMEOUT", "45"))
 
-app = FastAPI(title="INNOVATION VISION Failover Orchestrator", version="0.1.0")
+app = FastAPI(title="INNOVATION VISION Failover Orchestrator", version="0.2.0")
 
 
 def db():
@@ -137,8 +137,8 @@ def run_failover(dvr_id: UUID, payload: FailoverRequest):
             "validate destination with real frames",
             "switch every camera route to destination session",
             "verify resulting active routes",
-            "close source vendor session",
-            "close source database session and release old leases",
+            "close source session",
+            "release old leases",
             "commit operation and audit",
         ],
     }
@@ -147,6 +147,7 @@ def run_failover(dvr_id: UUID, payload: FailoverRequest):
 
     destination_session = None
     switched_cameras: list[str] = []
+    rollback_errors: list[str] = []
     try:
         with db() as conn, conn.cursor() as cur:
             set_operation(cur, op["id"], "OPENING_DESTINATION", "open_destination")
@@ -220,8 +221,11 @@ def run_failover(dvr_id: UUID, payload: FailoverRequest):
             with db() as conn, conn.cursor() as cur:
                 set_operation(cur, op["id"], "CLOSING_SOURCE", "close_source")
                 conn.commit()
-            if source.get("vendor_session_ref"):
-                api("POST", f"{P2P_SUPERVISOR_URL}/v1/p2p/sessions/{source['id']}/close", {"actor_type": payload.actor_type, "reason": f"failover_committed:{op['id']}"})
+            api(
+                "POST",
+                f"{P2P_SUPERVISOR_URL}/v1/p2p/sessions/{source['id']}/close",
+                {"actor_type": payload.actor_type, "reason": f"failover_committed:{op['id']}"},
+            )
 
         with db() as conn, conn.cursor() as cur:
             set_operation(cur, op["id"], "COMMITTED", "complete", details={"verified_routes": verified}, completed=True)
@@ -238,16 +242,51 @@ def run_failover(dvr_id: UUID, payload: FailoverRequest):
             conn.commit()
 
         if destination_session:
+            for camera_id in reversed(switched_cameras):
+                try:
+                    api(
+                        "POST",
+                        f"{STREAM_BROKER_URL}/v1/routes/rollback",
+                        {
+                            "camera_id": camera_id,
+                            "expected_current_session_id": str(destination_session["id"]),
+                            "reason": f"failover_rollback:{op['id']}",
+                            "actor_type": "SYSTEM",
+                        },
+                    )
+                except Exception as rollback_exc:
+                    rollback_errors.append(f"route:{camera_id}:{rollback_exc}")
             try:
-                api("POST", f"{P2P_SUPERVISOR_URL}/v1/p2p/sessions/{destination_session['id']}/close", {"actor_type": "SYSTEM", "reason": f"failover_rollback:{op['id']}"})
-            except Exception:
-                pass
+                api(
+                    "POST",
+                    f"{P2P_SUPERVISOR_URL}/v1/p2p/sessions/{destination_session['id']}/close",
+                    {"actor_type": "SYSTEM", "reason": f"failover_rollback:{op['id']}"},
+                )
+            except Exception as rollback_exc:
+                rollback_errors.append(f"destination_close:{rollback_exc}")
 
+        final_state = "ROLLED_BACK" if not rollback_errors else "FAILED"
         with db() as conn, conn.cursor() as cur:
-            set_operation(cur, op["id"], "ROLLED_BACK", "rollback_complete", error=str(exc), completed=True)
+            set_operation(
+                cur,
+                op["id"],
+                final_state,
+                "rollback_complete" if not rollback_errors else "rollback_incomplete",
+                error=str(exc),
+                details={"rollback_errors": rollback_errors},
+                completed=True,
+            )
             cur.execute(
                 "INSERT INTO audit_logs(actor_type,action,object_type,object_id,metadata) VALUES ('SYSTEM','p2p.failover.rollback','dvr',%s,%s::jsonb)",
-                (str(dvr_id), json.dumps({"operation_id": str(op["id"]), "error": str(exc)})),
+                (str(dvr_id), json.dumps({"operation_id": str(op["id"]), "error": str(exc), "rollback_errors": rollback_errors})),
             )
             conn.commit()
-        raise HTTPException(status_code=502, detail={"message": "failover rolled back", "operation_id": str(op["id"]), "error": str(exc)}) from exc
+        raise HTTPException(
+            status_code=502,
+            detail={
+                "message": "failover rolled back" if not rollback_errors else "failover rollback incomplete; operator intervention required",
+                "operation_id": str(op["id"]),
+                "error": str(exc),
+                "rollback_errors": rollback_errors,
+            },
+        ) from exc
