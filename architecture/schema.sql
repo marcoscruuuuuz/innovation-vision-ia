@@ -67,10 +67,40 @@ CREATE TABLE IF NOT EXISTS wine_workers (
     created_at timestamptz NOT NULL DEFAULT now()
 );
 
+CREATE TABLE IF NOT EXISTS wine_dvr_assignments (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    dvr_id uuid NOT NULL REFERENCES dvrs(id) ON DELETE CASCADE,
+    wine_worker_id uuid NOT NULL REFERENCES wine_workers(id) ON DELETE CASCADE,
+    state text NOT NULL DEFAULT 'ACTIVE' CHECK (state IN ('PLANNED','ACTIVE','DRAINING','ENDED','FAILED')),
+    load_score numeric(12,4),
+    assigned_at timestamptz NOT NULL DEFAULT now(),
+    ended_at timestamptz,
+    reason text,
+    actor_type text NOT NULL DEFAULT 'SYSTEM' CHECK (actor_type IN ('USER','AI','WATCHDOG','SYSTEM'))
+);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_active_wine_dvr_assignment ON wine_dvr_assignments(dvr_id) WHERE ended_at IS NULL AND state IN ('PLANNED','ACTIVE','DRAINING');
+
+CREATE TABLE IF NOT EXISTS p2p_port_leases (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    port integer NOT NULL CHECK (port BETWEEN 1 AND 65535),
+    protocol text NOT NULL CHECK (protocol IN ('SDK_TCP','RTSP_TCP')),
+    dvr_id uuid NOT NULL REFERENCES dvrs(id) ON DELETE CASCADE,
+    wine_worker_id uuid REFERENCES wine_workers(id) ON DELETE SET NULL,
+    lease_token uuid NOT NULL DEFAULT gen_random_uuid(),
+    state text NOT NULL DEFAULT 'RESERVED' CHECK (state IN ('RESERVED','BOUND','RELEASED','EXPIRED')),
+    leased_at timestamptz NOT NULL DEFAULT now(),
+    expires_at timestamptz NOT NULL,
+    released_at timestamptz,
+    UNIQUE (lease_token)
+);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_live_p2p_port_lease ON p2p_port_leases(port) WHERE state IN ('RESERVED','BOUND') AND released_at IS NULL;
+
 CREATE TABLE IF NOT EXISTS p2p_sessions (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     dvr_id uuid NOT NULL REFERENCES dvrs(id) ON DELETE CASCADE,
     wine_worker_id uuid REFERENCES wine_workers(id) ON DELETE SET NULL,
+    sdk_lease_id uuid REFERENCES p2p_port_leases(id) ON DELETE RESTRICT,
+    rtsp_lease_id uuid REFERENCES p2p_port_leases(id) ON DELETE RESTRICT,
     sdk_local_port integer NOT NULL CHECK (sdk_local_port BETWEEN 1 AND 65535),
     rtsp_local_port integer NOT NULL CHECK (rtsp_local_port BETWEEN 1 AND 65535),
     state text NOT NULL CHECK (state IN ('OPENING','ACTIVE','DEGRADED','CLOSING','CLOSED','FAILED')),
@@ -83,12 +113,8 @@ CREATE TABLE IF NOT EXISTS p2p_sessions (
     actor_type text NOT NULL DEFAULT 'WATCHDOG' CHECK (actor_type IN ('USER','AI','WATCHDOG','SYSTEM')),
     created_at timestamptz NOT NULL DEFAULT now()
 );
-
-CREATE UNIQUE INDEX IF NOT EXISTS uq_active_p2p_sdk_port
-ON p2p_sessions (sdk_local_port) WHERE ended_at IS NULL;
-
-CREATE UNIQUE INDEX IF NOT EXISTS uq_active_p2p_rtsp_port
-ON p2p_sessions (rtsp_local_port) WHERE ended_at IS NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS uq_active_p2p_sdk_port ON p2p_sessions (sdk_local_port) WHERE ended_at IS NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS uq_active_p2p_rtsp_port ON p2p_sessions (rtsp_local_port) WHERE ended_at IS NULL;
 
 CREATE TABLE IF NOT EXISTS camera_health_history (
     id bigserial PRIMARY KEY,
@@ -188,55 +214,18 @@ CREATE TABLE IF NOT EXISTS audit_logs (
     actor_type text NOT NULL CHECK (actor_type IN ('USER','AI','WATCHDOG','SYSTEM')),
     actor_id text,
     action text NOT NULL,
-    object_type text NOT NULL,
-    object_id text,
-    metadata jsonb NOT NULL DEFAULT '{}'::jsonb,
+    target_type text,
+    target_id text,
+    details jsonb NOT NULL DEFAULT '{}'::jsonb,
     created_at timestamptz NOT NULL DEFAULT now()
 );
-
-CREATE INDEX IF NOT EXISTS idx_cameras_condominium ON cameras(condominium_id);
-CREATE INDEX IF NOT EXISTS idx_camera_health_observed ON camera_health_history(camera_id, observed_at DESC);
-CREATE INDEX IF NOT EXISTS idx_candidates_review ON event_candidates(review_status, created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_logs_condo_time ON event_logs(condominium_id, occurred_at DESC);
-CREATE INDEX IF NOT EXISTS idx_logs_camera_time ON event_logs(camera_id, occurred_at DESC);
-CREATE INDEX IF NOT EXISTS idx_p2p_dvr_time ON p2p_sessions(dvr_id, started_at DESC);
-
-CREATE TABLE IF NOT EXISTS p2p_port_leases (
-    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-    port_type text NOT NULL CHECK (port_type IN ('SDK_TCP','RTSP')),
-    port integer NOT NULL CHECK (port BETWEEN 1 AND 65535),
-    dvr_id uuid REFERENCES dvrs(id) ON DELETE CASCADE,
-    wine_worker_id uuid REFERENCES wine_workers(id) ON DELETE SET NULL,
-    lease_owner text NOT NULL,
-    leased_at timestamptz NOT NULL DEFAULT now(),
-    lease_expires_at timestamptz,
-    released_at timestamptz
-);
-
-CREATE UNIQUE INDEX IF NOT EXISTS uq_active_p2p_port_lease
-ON p2p_port_leases(port) WHERE released_at IS NULL;
-
-CREATE TABLE IF NOT EXISTS dvr_wine_assignments (
-    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-    dvr_id uuid NOT NULL REFERENCES dvrs(id) ON DELETE CASCADE,
-    wine_worker_id uuid NOT NULL REFERENCES wine_workers(id) ON DELETE CASCADE,
-    active boolean NOT NULL DEFAULT true,
-    load_score numeric(12,4),
-    reason text,
-    assigned_at timestamptz NOT NULL DEFAULT now(),
-    ended_at timestamptz
-);
-
-CREATE UNIQUE INDEX IF NOT EXISTS uq_active_dvr_wine_assignment
-ON dvr_wine_assignments(dvr_id) WHERE active = true AND ended_at IS NULL;
 
 CREATE TABLE IF NOT EXISTS model_registry (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     model_key text NOT NULL,
     version text NOT NULL,
-    task text NOT NULL,
-    artifact_ref text NOT NULL,
-    sha256 text NOT NULL,
+    purpose text NOT NULL,
+    sha256 text,
     active boolean NOT NULL DEFAULT false,
     metadata jsonb NOT NULL DEFAULT '{}'::jsonb,
     created_at timestamptz NOT NULL DEFAULT now(),
@@ -245,37 +234,22 @@ CREATE TABLE IF NOT EXISTS model_registry (
 
 CREATE TABLE IF NOT EXISTS event_feedback (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-    event_candidate_id uuid REFERENCES event_candidates(id) ON DELETE CASCADE,
-    event_log_id uuid REFERENCES event_logs(id) ON DELETE CASCADE,
-    label text NOT NULL CHECK (label IN ('CORRECT','FALSE_POSITIVE','FALSE_NEGATIVE','INCONCLUSIVE')),
+    event_candidate_id uuid REFERENCES event_candidates(id) ON DELETE SET NULL,
+    event_log_id uuid REFERENCES event_logs(id) ON DELETE SET NULL,
+    label text NOT NULL CHECK (label IN ('correct','false_positive','false_negative','inconclusive')),
     user_id uuid REFERENCES users(id) ON DELETE SET NULL,
     notes text,
-    created_at timestamptz NOT NULL DEFAULT now(),
-    CHECK (event_candidate_id IS NOT NULL OR event_log_id IS NOT NULL)
+    created_at timestamptz NOT NULL DEFAULT now()
 );
 
 CREATE TABLE IF NOT EXISTS notification_deliveries (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-    event_log_id uuid NOT NULL REFERENCES event_logs(id) ON DELETE CASCADE,
-    channel text NOT NULL CHECK (channel IN ('WHATSAPP','WEBHOOK','EMAIL','INTERNAL')),
-    recipient_ref text NOT NULL,
-    provider text,
-    status text NOT NULL CHECK (status IN ('QUEUED','SENT','DELIVERED','FAILED','CANCELLED')),
-    attempts integer NOT NULL DEFAULT 0,
+    event_log_id uuid REFERENCES event_logs(id) ON DELETE CASCADE,
+    channel text NOT NULL,
+    destination_ref text NOT NULL,
+    state text NOT NULL DEFAULT 'QUEUED',
+    attempt_count integer NOT NULL DEFAULT 0,
     last_error text,
     created_at timestamptz NOT NULL DEFAULT now(),
     updated_at timestamptz NOT NULL DEFAULT now()
 );
-
-CREATE TABLE IF NOT EXISTS ai_chat_sessions (
-    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-    user_id uuid REFERENCES users(id) ON DELETE SET NULL,
-    condominium_id uuid REFERENCES condominiums(id) ON DELETE SET NULL,
-    scope text NOT NULL CHECK (scope IN ('ADMIN_IDE','CLIENT_LOG_QUERY')),
-    started_at timestamptz NOT NULL DEFAULT now(),
-    ended_at timestamptz
-);
-
-CREATE INDEX IF NOT EXISTS idx_port_leases_active ON p2p_port_leases(port_type, port) WHERE released_at IS NULL;
-CREATE INDEX IF NOT EXISTS idx_feedback_candidate ON event_feedback(event_candidate_id);
-CREATE INDEX IF NOT EXISTS idx_notifications_status ON notification_deliveries(status, created_at);
