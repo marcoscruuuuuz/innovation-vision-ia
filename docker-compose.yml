@@ -13,6 +13,7 @@ services:
       - ./data/postgres:/var/lib/postgresql/data
       - ./architecture/schema.sql:/docker-entrypoint-initdb.d/001-schema.sql:ro
       - ./architecture/migrations/002_p2p_runtime.sql:/docker-entrypoint-initdb.d/002-p2p-runtime.sql:ro
+      - ./architecture/migrations/003_streambroker_failover.sql:/docker-entrypoint-initdb.d/003-streambroker-failover.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-vision} -d ${POSTGRES_DB:-vision}"]
       interval: 10s
@@ -30,7 +31,7 @@ services:
         condition: service_healthy
     volumes:
       - ./architecture/migrations:/migrations:ro
-    command: ["sh", "-c", "psql -h postgres -U ${POSTGRES_USER:-vision} -d ${POSTGRES_DB:-vision} -v ON_ERROR_STOP=1 -f /migrations/002_p2p_runtime.sql"]
+    command: ["sh", "-c", "set -e; for f in /migrations/*.sql; do echo Applying $$f; psql -h postgres -U ${POSTGRES_USER:-vision} -d ${POSTGRES_DB:-vision} -v ON_ERROR_STOP=1 -f $$f; done"]
     networks: [vision_backend]
 
   redis:
@@ -108,13 +109,33 @@ services:
       retries: 10
     networks: [vision_backend]
 
+  stream-broker:
+    build:
+      context: ./p2p
+    restart: unless-stopped
+    command: ["uvicorn", "streambroker:app", "--host", "0.0.0.0", "--port", "8091"]
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-vision}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-vision}
+      STREAMBROKER_MIN_PROBE_FRAMES: ${STREAMBROKER_MIN_PROBE_FRAMES:-3}
+      STREAMBROKER_FAILURE_THRESHOLD: ${STREAMBROKER_FAILURE_THRESHOLD:-3}
+      STREAMBROKER_RECOVERY_THRESHOLD: ${STREAMBROKER_RECOVERY_THRESHOLD:-3}
+      STREAMBROKER_FAILOVER_COOLDOWN_SECONDS: ${STREAMBROKER_FAILOVER_COOLDOWN_SECONDS:-120}
+    depends_on:
+      db-migrate:
+        condition: service_completed_successfully
+    ports:
+      - "127.0.0.1:${VISION_STREAMBROKER_PORT:-8091}:8091"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8091/health', timeout=3)"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+    networks: [vision_backend]
+
   prometheus:
     image: prom/prometheus:latest
     restart: unless-stopped
-    command:
-      - --config.file=/etc/prometheus/prometheus.yml
-      - --storage.tsdb.path=/prometheus
-      - --storage.tsdb.retention.time=15d
+    command: ["--config.file=/etc/prometheus/prometheus.yml", "--storage.tsdb.path=/prometheus", "--storage.tsdb.retention.time=15d"]
     volumes:
       - ./configs/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - prometheus_data:/prometheus
