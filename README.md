@@ -26,7 +26,7 @@ O control plane final Intelbras P2P/Wine também está implementado, porém isol
 - Watchdog P2P automático com hysteresis/cooldown e disparo do failover.
 - Painel P2P administrativo com planejamento e botão de troca emergencial de túnel.
 - PostgreSQL, Redis, MinIO, Prometheus, Grafana e DCGM opcional.
-- Instalador Ubuntu único e CI com build/migrations/smoke tests.
+- Instalador/atualizador Ubuntu único e CI com build/migrations/smoke tests.
 
 ## Detecção
 
@@ -53,18 +53,79 @@ Uma regra em `DRAFT`, `SHADOW`, `HOMOLOGATION`, `AI_REVIEW` ou `CERTIFIED` não 
 - API: `http://127.0.0.1:8080`
 - Ingestion API: `http://127.0.0.1:8100`
 
-O instalador gera um token bootstrap de administração em `/opt/vision/secrets/bootstrap-admin-token`. Use-o apenas para bootstrap e emissão de tokens administrativos normais.
+O instalador gera um token bootstrap de administração em `/home/innovation/innovation-vision-ia/secrets/bootstrap-admin-token`. Use-o apenas para bootstrap e emissão de tokens administrativos normais.
+
+## Instalação e atualização no Ubuntu
+
+O cenário padrão usa o usuário `innovation` com `sudo` e salva tudo dentro da home:
+
+```text
+/home/innovation/innovation-vision-ia
+```
+
+Não é necessário entrar como root. Execute como `innovation`:
+
+```bash
+cd /home/innovation/innovation-vision-ia
+bash scripts/install_ubuntu.sh
+```
+
+Se o script precisar de privilégios, ele chama `sudo` automaticamente. Também é válido executar diretamente com:
+
+```bash
+sudo -E bash scripts/install_ubuntu.sh
+```
+
+O mesmo comando serve para instalação limpa e para atualização. Em uma atualização o script:
+
+1. atualiza os pacotes Ubuntu;
+2. cria backup de `.env`, `secrets`, `configs` e PostgreSQL quando disponível em `/home/innovation/vision-backups/`;
+3. executa `git fetch` e `git pull --ff-only` na branch `main`;
+4. preserva `.env`, `data/`, `models/`, `logs/`, `backups/` e `secrets/`;
+5. aplica migrations;
+6. reconstrói as imagens da aplicação;
+7. recria/sube os serviços;
+8. executa health checks locais.
+
+O instalador adiciona `innovation` ao grupo `docker`. Na primeira instalação, saia e entre novamente na sessão SSH/shell depois da conclusão para que o grupo seja aplicado ao terminal interativo.
+
+### Opções úteis
+
+Instalação normal, sem Wine/P2P:
+
+```bash
+bash scripts/install_ubuntu.sh
+```
+
+Ativar também a fase Intelbras/Wine/P2P:
+
+```bash
+ENABLE_P2P=yes INSTALL_WINE=yes bash scripts/install_ubuntu.sh
+```
+
+Não executar `apt upgrade` completo:
+
+```bash
+FULL_UPGRADE=no bash scripts/install_ubuntu.sh
+```
+
+Somente preparar/atualizar sem subir a stack:
+
+```bash
+START_STACK=no bash scripts/install_ubuntu.sh
+```
+
+Não atualizar o Git nesta execução:
+
+```bash
+UPDATE_REPOSITORY=no bash scripts/install_ubuntu.sh
+```
 
 ## P2P/Wine final
 
-O stack padrão continua sem Wine/P2P. O código final fica atrás do profile `p2p`:
+O stack padrão continua sem Wine/P2P. O código final fica atrás do profile `p2p`.
 
-```bash
-INSTALL_WINE=yes sudo -E bash scripts/install_ubuntu.sh
-docker compose --profile p2p up -d p2p-supervisor stream-broker failover-orchestrator p2p-watchdog
-```
-
-Serviços locais:
+Serviços locais quando ativados:
 
 - P2P Supervisor: `127.0.0.1:8090`
 - StreamBroker: `127.0.0.1:8091`
@@ -74,16 +135,6 @@ Serviços locais:
 `INTELBRAS_VENDOR_ADAPTER_ENABLED=false` permanece como default. Sem o executável autorizado, a abertura real de sessão é bloqueada e o watchdog não dispara alterações. Uma sessão só pode virar `ACTIVE` após probe de frames reais. O watchdog mede saúde do túnel; depois do limiar configurado de falhas o StreamBroker aplica hysteresis/cooldown e o Failover Orchestrator executa make-before-break, valida todas as rotas e faz rollback explícito em qualquer falha.
 
 Nenhum SDK/DLL/EXE Intelbras proprietário é versionado neste repositório.
-
-## Instalação
-
-Ubuntu 24.04 LTS recomendado:
-
-```bash
-sudo bash scripts/install_ubuntu.sh
-```
-
-O instalador prepara Docker/Compose, Tailscale opcional, NVIDIA Container Toolkit quando aplicável, `/opt/vision`, bancos, workers, retenção e portais. Wine fica desativado por padrão e só é instalado com `INSTALL_WINE=yes`.
 
 ## Documentação
 
