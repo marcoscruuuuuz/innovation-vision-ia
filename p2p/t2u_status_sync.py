@@ -50,7 +50,7 @@ def sync_once() -> dict[str, int]:
             vendor_ref = f"t2u:{binding.device_id}"
             cur.execute(
                 """
-                SELECT id FROM p2p_sessions
+                SELECT id,vendor_metadata FROM p2p_sessions
                  WHERE dvr_id=%s AND vendor_session_ref=%s AND ended_at IS NULL
                  ORDER BY started_at DESC LIMIT 1
                 """,
@@ -64,6 +64,7 @@ def sync_once() -> dict[str, int]:
                         "bridge": binding.bridge_slug,
                         "device_id": binding.device_id,
                         "status_updated_at": binding.updated_at,
+                        "bridge_started_at": binding.bridge_started_at,
                     }
                 )
                 cur.execute(
@@ -71,6 +72,21 @@ def sync_once() -> dict[str, int]:
                     (f"t2u:{binding.bridge_slug}",),
                 )
                 worker = cur.fetchone()
+                restarted = bool(
+                    session
+                    and isinstance(session.get("vendor_metadata"), dict)
+                    and session["vendor_metadata"].get("bridge_started_at") != binding.bridge_started_at
+                )
+                if restarted:
+                    cur.execute(
+                        """
+                        UPDATE p2p_sessions
+                           SET state='CLOSED',ended_at=now(),close_reason='t2u_gateway_restarted',last_health_at=now()
+                         WHERE id=%s
+                        """,
+                        (session["id"],),
+                    )
+                    session = None
                 if session:
                     cur.execute(
                         """
