@@ -44,8 +44,13 @@ jobs:
         run: |
           docker compose up -d postgres
           docker compose run --rm db-migrate
-          docker compose exec -T postgres psql -U vision -d vision -v ON_ERROR_STOP=1 -c "SELECT to_regclass('public.ingestion_events'), to_regclass('public.detection_results'), to_regclass('public.rule_evaluations'), to_regclass('public.event_confidence_policies'), to_regclass('public.user_api_tokens'), to_regclass('public.retention_job_runs'), to_regclass('public.alert_policies'), to_regclass('public.p2p_failover_operations');"
+          docker compose exec -T postgres psql -U vision -d vision -v ON_ERROR_STOP=1 -c "SELECT to_regclass('public.ingestion_events'), to_regclass('public.detection_results'), to_regclass('public.rule_evaluations'), to_regclass('public.event_confidence_policies'), to_regclass('public.user_api_tokens'), to_regclass('public.retention_job_runs'), to_regclass('public.alert_policies'), to_regclass('public.p2p_failover_operations'), to_regclass('public.portal_login_audit');"
+          docker compose exec -T postgres psql -U vision -d vision -v ON_ERROR_STOP=1 -c "SELECT ip_lan,channel_count FROM dvrs LIMIT 0; SELECT last_login_at FROM users LIMIT 0;"
           docker compose exec -T postgres psql -U vision -d vision -v ON_ERROR_STOP=1 -c "SELECT rolname FROM pg_roles WHERE rolname='vision_portal';"
+      - name: Seed password login fixture
+        run: |
+          HASH=$(python3 -c "import sys;sys.path.insert(0,'core/api');from app.auth_utils import hash_password;print(hash_password('TestPass123!'))")
+          docker compose exec -T postgres psql -U vision -d vision -v ON_ERROR_STOP=1 -v hash="$HASH" -c "INSERT INTO users(username,password_hash,role,active) VALUES ('ci-admin', :'hash', 'admin', true) ON CONFLICT(username) DO UPDATE SET password_hash=excluded.password_hash,role='admin',active=true;"
       - name: Smoke core HTTP services
         run: |
           wait_url() {
@@ -57,15 +62,22 @@ jobs:
             echo "service did not become ready: $url" >&2
             return 1
           }
-          docker compose up -d redis minio api ingestion-api portal-admin portal-client
+          docker compose up -d redis minio prometheus node-exporter api ingestion-api portal-admin portal-client
           wait_url http://127.0.0.1:8080/health
           wait_url http://127.0.0.1:8100/health
           wait_url http://127.0.0.1:8083/
+          wait_url http://127.0.0.1:8083/cadastros.html
+          wait_url http://127.0.0.1:8083/live.html
           wait_url http://127.0.0.1:8083/rules.html
+          wait_url http://127.0.0.1:8083/logs.html
+          wait_url http://127.0.0.1:8083/alerts.html
           wait_url http://127.0.0.1:8083/p2p.html
           wait_url http://127.0.0.1:8084/
-          curl -fsS http://127.0.0.1:8080/health
-          curl -fsS -H 'Authorization: Bearer CHANGE_ME_ADMIN_TOKEN' http://127.0.0.1:8080/api/v1/admin/dashboard
+          curl -fsS -H 'Authorization: Bearer CHANGE_ME_ADMIN_TOKEN' http://127.0.0.1:8080/api/v1/admin/dashboard-full
+          curl -fsS -H 'Authorization: Bearer CHANGE_ME_ADMIN_TOKEN' http://127.0.0.1:8080/api/v1/admin/inventory
+          curl -fsS -H 'Authorization: Bearer CHANGE_ME_ADMIN_TOKEN' http://127.0.0.1:8080/api/v1/admin/event-catalog | grep -q 'porta_aberta_bloco'
+          LOGIN=$(curl -fsS -H 'Content-Type: application/json' -d '{"username":"ci-admin","password":"TestPass123!"}' http://127.0.0.1:8080/api/v1/auth/login)
+          echo "$LOGIN" | grep -q '"role":"admin"'
           curl -fsS http://127.0.0.1:8100/health
       - name: Smoke final P2P control plane with vendor disabled
         run: |
