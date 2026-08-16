@@ -82,3 +82,13 @@ Ações destrutivas exigem confirmação e geram audit log.
 ## Dependência proprietária
 
 DLLs, executáveis, SDKs e binários Intelbras necessários ao bridge P2P não são armazenados neste repositório. Devem ser implantados a partir de fonte autorizada e versionados em inventário interno com checksum.
+
+## Bridge QR/T2U já instalado
+
+Quando o gateway autorizado estiver em /opt/vision-ia/qr-gateway, o instalador detecta o SDK Linux, os arquivos de status e o mapa de DVRs. Ele inicia dois serviços internos:
+
+- t2u-status-sync: registra somente túneis que o bridge reporta como conectados e mostra a porta SDK real; não inventa porta RTSP.
+- t2u-capture: abre uma sessão curta pelo SDK oficial para a câmera selecionada, decodifica o stream DHAV e entrega um JPEG real ao portal administrativo.
+
+O acesso ao mapa e às credenciais do gateway é somente leitura e fica restrito ao contêiner de captura. Se o SDK não fornecer frame, a câmera permanece sem vídeo validado.
+
