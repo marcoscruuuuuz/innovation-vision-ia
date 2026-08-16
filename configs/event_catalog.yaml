@@ -81,10 +81,29 @@ events:
   bola_fora_quadra: {geometry_required: true, geometry: polygon, engine: child_person_ball_association, certification_required: true}
   veiculo_area_proibida: {geometry_required: true, geometry: line, default_duration_seconds: 20, engine: vehicle_tracker_temporal, certification_required: true}
   veiculo_parado_irregular: {geometry_required: true, geometry: polygon, default_duration_seconds: 20, engine: vehicle_tracker_temporal, certification_required: true}
-  veiculo_contramao: {geometry_required: true, geometry: line, engine: vehicle_tracker_direction, certification_required: true}
+  veiculo_contramao:
+    geometry_required: true
+    geometry: line
+    engine: vehicle_tracker_direction
+    certification_required: true
+    model_requirements:
+      adapter: paddle_ppvehicle_specialist
+      vehicle_tracking: PaddleDetection_PP-Vehicle_2.9_PP-Tracking
+      lane_segmentation: PaddleDetection_PP-LiteSeg
+      decision: tracked_vehicle_direction_against_configured_lane_vector
+      activation: requires_real_adapter_and_camera_calibration
   movimentacao_apos_22h: {geometry_required: false, engine: motion_scene_change_detector, schedule_default: "22:00-06:00", certification_required: true}
   pessoa_fora_horario_22h: {geometry_required: false, engine: motion_scene_change_detector, schedule_default: "22:00-06:00", certification_required: true}
-  placa_detectada: {geometry_required: false, engine: vehicle_plate_detector_ocr_temporal_vote, certification_required: true}
+  placa_detectada:
+    geometry_required: false
+    engine: vehicle_plate_detector_ocr_temporal_vote
+    certification_required: true
+    model_requirements:
+      adapter: paddle_ppvehicle_specialist
+      plate_detector: PaddleDetection_PP-Vehicle_license_plate_detector
+      plate_recognizer: PaddleOCR_PP-OCRv3_license_plate_recognizer
+      decision: temporal_multi_frame_ocr_vote
+      activation: requires_real_adapter_and_plate_camera_validation
   face_detectada: {geometry_required: false, engine: face_detector, certification_required: true}
   porteiro_dormindo: {geometry_required: true, geometry: polygon, engine: person_pose_inactivity, certification_required: true}
   possivel_porteiro_dormindo: {geometry_required: true, geometry: polygon, engine: person_pose_inactivity, certification_required: true}
