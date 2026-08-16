@@ -53,7 +53,7 @@ Uma regra em `DRAFT`, `SHADOW`, `HOMOLOGATION`, `AI_REVIEW` ou `CERTIFIED` não 
 - API: `http://127.0.0.1:8080`
 - Ingestion API: `http://127.0.0.1:8100`
 
-O instalador gera um token bootstrap de administração em `/home/innovation/innovation-vision-ia/secrets/bootstrap-admin-token`. Use-o apenas para bootstrap e emissão de tokens administrativos normais.
+O instalador cria o primeiro administrador corporativo com usuário e senha. As credenciais iniciais ficam protegidas em `/home/innovation/innovation-vision-ia/secrets/initial-portal-admin-credentials`; o portal não aceita token bootstrap.
 
 ## Instalação e atualização no Ubuntu
 

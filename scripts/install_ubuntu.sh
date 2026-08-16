@@ -241,17 +241,34 @@ prepare_environment() {
   log 'Preparando .env e credenciais locais'
   if [[ ! -f "$VISION_ROOT/.env" ]]; then
     cp "$VISION_ROOT/.env.example" "$VISION_ROOT/.env"
-    local postgres_password minio_password grafana_password admin_token
+    local postgres_password minio_password grafana_password initial_admin_password
     postgres_password="$(openssl rand -hex 32)"
     minio_password="$(openssl rand -hex 32)"
     grafana_password="$(openssl rand -hex 24)"
-    admin_token="$(openssl rand -hex 32)"
+    initial_admin_password="$(openssl rand -hex 24)"
     sed -i "s/CHANGE_ME_POSTGRES/${postgres_password}/" "$VISION_ROOT/.env"
     sed -i "s/CHANGE_ME_MINIO/${minio_password}/" "$VISION_ROOT/.env"
     sed -i "s/CHANGE_ME_GRAFANA/${grafana_password}/" "$VISION_ROOT/.env"
-    sed -i "s/CHANGE_ME_ADMIN_TOKEN/${admin_token}/" "$VISION_ROOT/.env"
-    printf '%s\n' "$admin_token" >"$VISION_ROOT/secrets/bootstrap-admin-token"
+    sed -i "s/CHANGE_ME_INITIAL_ADMIN_PASSWORD/${initial_admin_password}/" "$VISION_ROOT/.env"
   fi
+  # Bootstrap tokens are deliberately removed: portal access is exclusively
+  # username/password, with a session issued only after a successful login.
+  sed -i '/^VISION_BOOTSTRAP_ADMIN_TOKEN=/d; /^VISION_PORTAL_SETUP_TOKEN=/d' "$VISION_ROOT/.env"
+  rm -f "$VISION_ROOT/secrets/bootstrap-admin-token" "$VISION_ROOT/secrets/portal-setup-token"
+  if ! grep -q '^VISION_INITIAL_ADMIN_USERNAME=' "$VISION_ROOT/.env"; then
+    printf '\nVISION_INITIAL_ADMIN_USERNAME=innovation-admin\n' >>"$VISION_ROOT/.env"
+  fi
+  if ! grep -q '^VISION_INITIAL_ADMIN_PASSWORD=' "$VISION_ROOT/.env"; then
+    local initial_admin_password
+    initial_admin_password="$(openssl rand -hex 24)"
+    printf 'VISION_INITIAL_ADMIN_PASSWORD=%s\n' "$initial_admin_password" >>"$VISION_ROOT/.env"
+  fi
+  local initial_admin_username initial_admin_password_value
+  initial_admin_username="$(sed -n 's/^VISION_INITIAL_ADMIN_USERNAME=//p' "$VISION_ROOT/.env" | tail -n 1)"
+  initial_admin_password_value="$(sed -n 's/^VISION_INITIAL_ADMIN_PASSWORD=//p' "$VISION_ROOT/.env" | tail -n 1)"
+  [[ -n "$initial_admin_username" && -n "$initial_admin_password_value" && "$initial_admin_password_value" != "CHANGE_ME_INITIAL_ADMIN_PASSWORD" ]] \
+    || die 'credenciais iniciais do administrador nao foram configuradas'
+  printf 'usuario=%s\nsenha=%s\n' "$initial_admin_username" "$initial_admin_password_value" >"$VISION_ROOT/secrets/initial-portal-admin-credentials"
   chmod 0600 "$VISION_ROOT/.env"
   find "$VISION_ROOT/secrets" -type d -exec chmod 0750 {} +
   find "$VISION_ROOT/secrets" -type f -exec chmod 0600 {} +
@@ -284,6 +301,12 @@ migrate_and_build() {
         p2p-supervisor stream-broker failover-orchestrator p2p-watchdog
     fi
   fi
+}
+
+provision_initial_admin() {
+  cd "$VISION_ROOT"
+  log 'Garantindo administrador inicial por usuario e senha'
+  docker compose --env-file .env run --rm --no-deps api python -m app.provision_admin
 }
 
 core_services=(postgres redis minio prometheus node-exporter grafana api ingestion-api detection-worker rule-worker temporal-worker certification-worker notification-worker retention-worker clip-builder portal-admin portal-client)
@@ -366,7 +389,7 @@ print_summary() {
   printf 'Ingestion: http://127.0.0.1:8100\n'
   printf 'Grafana: http://127.0.0.1:3000\n'
   printf 'MinIO Console: http://127.0.0.1:9001\n'
-  printf 'Token bootstrap: %s/secrets/bootstrap-admin-token\n' "$VISION_ROOT"
+  printf 'Credenciais iniciais do administrador: %s/secrets/initial-portal-admin-credentials\n' "$VISION_ROOT"
   printf 'Backups de update: %s/vision-backups/\n' "$VISION_HOME"
   printf '\nPara atualizar futuramente, execute novamente:\n'
   printf '  cd %s && bash scripts/install_ubuntu.sh\n' "$VISION_ROOT"
@@ -390,6 +413,7 @@ main() {
   prepare_environment
   validate_repository
   migrate_and_build
+  provision_initial_admin
   install_systemd_unit
   start_stack
   health_check

@@ -291,8 +291,9 @@ def dashboard_full(authorization: str | None = Header(default=None)):
         logs_realtime = cur.fetchone()["n"]
         cur.execute(
             """
-            SELECT d.id,d.name,d.condominium_id,s.sdk_local_port,s.rtsp_local_port,s.state,s.started_at,s.last_frame_at,w.worker_key
-              FROM dvrs d LEFT JOIN LATERAL (
+            SELECT d.id,d.name,d.condominium_id,co.name AS condominium_name,s.sdk_local_port,s.rtsp_local_port,s.state,s.started_at,s.last_frame_at,w.worker_key,
+                   (s.state='ACTIVE' AND s.last_frame_at >= now()-interval '60 seconds') AS video_validated
+              FROM dvrs d JOIN condominiums co ON co.id=d.condominium_id LEFT JOIN LATERAL (
                 SELECT * FROM p2p_sessions ps WHERE ps.dvr_id=d.id AND ps.ended_at IS NULL ORDER BY ps.started_at DESC LIMIT 1
               ) s ON true LEFT JOIN wine_workers w ON w.id=s.wine_worker_id
              WHERE d.enabled=true ORDER BY d.condominium_id,d.name

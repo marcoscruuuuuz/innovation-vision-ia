@@ -1,5 +1,12 @@
 # 03 - Eventos e Editor de Regras
 
+## Modelos para tráfego
+
+- **Veículo na contramão:** PP-Vehicle/PP-Tracking com segmentação de faixa PP-LiteSeg. A direção é comparada ao vetor de faixa desenhado e calibrado na ROI.
+- **Placa do veículo:** detector de placa PP-Vehicle e reconhecedor de placa PP-OCRv3, com voto temporal entre frames.
+
+Esses modelos são requisitos de configuração, não uma alegação de operação: sem adaptador especializado, pesos, câmera e frames reais, o worker deve manter a regra bloqueada como `MODEL_REQUIRED`.
+
 ## Editor por câmera
 
 Fluxo de seleção:

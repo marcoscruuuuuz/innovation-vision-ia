@@ -33,10 +33,10 @@ O script se eleva com sudo quando necessário. Também é válido:
 sudo -E bash scripts/install_ubuntu.sh
 ```
 
-Em instalação limpa, ele cria as credenciais locais e o token bootstrap em:
+Em instalação limpa, ele cria as credenciais locais e o primeiro administrador corporativo em:
 
 ```text
-/home/innovation/innovation-vision-ia/secrets/bootstrap-admin-token
+/home/innovation/innovation-vision-ia/secrets/initial-portal-admin-credentials
 ```
 
 Em atualização, ele faz backup de `.env`, `secrets`, `configs` e PostgreSQL quando disponível, preserva os dados de runtime, aplica migrations e reconstrói/sobe explicitamente todos os workers, incluindo `temporal-worker` e `clip-builder`.
