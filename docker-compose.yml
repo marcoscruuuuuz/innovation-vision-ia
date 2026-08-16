@@ -313,6 +313,7 @@ services:
       - ${T2U_GATEWAY_ROOT:-./secrets/vendor/intelbras/t2u-gateway}/sdk:/gateway/sdk:ro
       - ${T2U_GATEWAY_ROOT:-./secrets/vendor/intelbras/t2u-gateway}/imported/config-original/condo-device-map.json:/gateway/condo-device-map.json:ro
       - ${T2U_GATEWAY_ROOT:-./secrets/vendor/intelbras/t2u-gateway}/imported/config-original/fleet-secrets.json:/gateway/fleet-secrets.json:ro
+      - /run/vision-ia:/host-control:ro
     depends_on:
       db-migrate: {condition: service_completed_successfully}
     ports: ["127.0.0.1:${VISION_T2U_CAPTURE_PORT:-8093}:8093"]
