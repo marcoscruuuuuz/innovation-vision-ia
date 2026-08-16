@@ -21,6 +21,8 @@ INSTALL_NVIDIA_TOOLKIT="${INSTALL_NVIDIA_TOOLKIT:-auto}"
 INSTALL_NVIDIA_DRIVER="${INSTALL_NVIDIA_DRIVER:-no}"
 START_STACK="${START_STACK:-yes}"
 ENABLE_P2P="${ENABLE_P2P:-no}"
+ENABLE_T2U_GATEWAY="${ENABLE_T2U_GATEWAY:-auto}"
+T2U_GATEWAY_ROOT="${T2U_GATEWAY_ROOT:-/opt/vision-ia/qr-gateway}"
 FULL_UPGRADE="${FULL_UPGRADE:-yes}"
 UPDATE_REPOSITORY="${UPDATE_REPOSITORY:-yes}"
 BACKUP_BEFORE_UPDATE="${BACKUP_BEFORE_UPDATE:-yes}"
@@ -269,6 +271,32 @@ prepare_environment() {
   [[ -n "$initial_admin_username" && -n "$initial_admin_password_value" && "$initial_admin_password_value" != "CHANGE_ME_INITIAL_ADMIN_PASSWORD" ]] \
     || die 'credenciais iniciais do administrador nao foram configuradas'
   printf 'usuario=%s\nsenha=%s\n' "$initial_admin_username" "$initial_admin_password_value" >"$VISION_ROOT/secrets/initial-portal-admin-credentials"
+
+  case "$ENABLE_T2U_GATEWAY" in
+    auto)
+      if [[ -f "$T2U_GATEWAY_ROOT/sdk/bin/libdhnetsdk.so" && -d "$T2U_GATEWAY_ROOT/status" && -f "$T2U_GATEWAY_ROOT/imported/config-original/condo-device-map.json" && -f "$T2U_GATEWAY_ROOT/imported/config-original/fleet-secrets.json" ]]; then
+        ENABLE_T2U_GATEWAY=yes
+      else
+        ENABLE_T2U_GATEWAY=no
+      fi
+      ;;
+    yes|no) ;;
+    *) die 'ENABLE_T2U_GATEWAY deve ser auto, yes ou no' ;;
+  esac
+  if [[ "$ENABLE_T2U_GATEWAY" == yes && "$ENABLE_P2P" != yes ]]; then
+    die 'o gateway T2U exige ENABLE_P2P=yes'
+  fi
+  sed -i '/^T2U_GATEWAY_ROOT=/d; /^T2U_CAPTURE_URL=/d' "$VISION_ROOT/.env"
+  printf 'T2U_GATEWAY_ROOT=%s\n' "$T2U_GATEWAY_ROOT" >>"$VISION_ROOT/.env"
+  if [[ "$ENABLE_T2U_GATEWAY" == yes ]]; then
+    printf 'T2U_CAPTURE_URL=http://t2u-capture:8093\n' >>"$VISION_ROOT/.env"
+    log "Gateway T2U real habilitado: $T2U_GATEWAY_ROOT"
+    p2p_services+=(t2u-capture t2u-status-sync)
+  else
+    printf 'T2U_CAPTURE_URL=\n' >>"$VISION_ROOT/.env"
+    log 'Gateway T2U nao encontrado; captura SDK permanece desabilitada'
+  fi
+
   chmod 0600 "$VISION_ROOT/.env"
   find "$VISION_ROOT/secrets" -type d -exec chmod 0750 {} +
   find "$VISION_ROOT/secrets" -type f -exec chmod 0600 {} +
@@ -298,7 +326,7 @@ migrate_and_build() {
       notification-worker retention-worker clip-builder portal-admin portal-client
     if [[ "$ENABLE_P2P" == yes ]]; then
       docker compose --env-file .env --profile p2p build \
-        p2p-supervisor stream-broker failover-orchestrator p2p-watchdog
+        "${p2p_services[@]}"
     fi
   fi
 }
@@ -340,6 +368,37 @@ UNIT_EOF
   systemctl enable innovation-vision.service
 }
 
+install_t2u_control_service() {
+  [[ "$ENABLE_T2U_GATEWAY" == yes ]] || return 0
+  log 'Instalando controle protegido dos bridges T2U'
+  install -D -m 0750 -o root -g root \
+    "$VISION_ROOT/p2p/t2u_control_host.py" \
+    /usr/local/libexec/vision-ia-t2u-control
+  cat >/etc/systemd/system/vision-ia-t2u-control.service <<UNIT_EOF
+[Unit]
+Description=INNOVATION VISION IA - T2U bridge control
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+Group=root
+RuntimeDirectory=vision-ia
+RuntimeDirectoryMode=0700
+ExecStart=/usr/bin/python3 /usr/local/libexec/vision-ia-t2u-control --socket /run/vision-ia/t2u-control.sock --gateway-root ${T2U_GATEWAY_ROOT}
+Restart=always
+RestartSec=2
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
+UNIT_EOF
+  systemctl daemon-reload
+  systemctl enable --now vision-ia-t2u-control.service
+}
+
 start_stack() {
   [[ "$START_STACK" == yes ]] || return 0
   cd "$VISION_ROOT"
@@ -377,6 +436,17 @@ health_check() {
       || die "worker obrigatorio nao esta em execucao: ${service}"
     log "OK: worker ${service}"
   done
+  if [[ "$ENABLE_T2U_GATEWAY" == yes ]]; then
+    docker compose --env-file .env ps --status running --services t2u-capture | grep -qx t2u-capture \
+      || die 'captura T2U obrigatoria nao esta em execucao'
+    curl -fsS http://127.0.0.1:8093/health | grep -q '"connected_tunnels":' \
+      || die 'health check da captura T2U falhou'
+    log 'OK: captura e sincronizacao T2U'
+    systemctl is-active --quiet vision-ia-t2u-control.service \
+      || die 'controle protegido de restart T2U nao esta em execucao'
+    [[ -S /run/vision-ia/t2u-control.sock ]] \
+      || die 'socket de controle T2U nao foi criado'
+  fi
 }
 
 print_summary() {
@@ -397,6 +467,10 @@ print_summary() {
     printf '\nP2P/Wine permanece desligado. Para ativar depois:\n'
     printf '  ENABLE_P2P=yes INSTALL_WINE=yes bash scripts/install_ubuntu.sh\n'
   fi
+  if [[ "$ENABLE_T2U_GATEWAY" != yes ]]; then
+    printf '\nGateway QR/T2U nao foi habilitado. Para ativar quando estiver instalado:\n'
+    printf '  ENABLE_P2P=yes ENABLE_T2U_GATEWAY=yes bash scripts/install_ubuntu.sh\n'
+  fi
   if (( REBOOT_REQUIRED == 1 )); then
     warn 'Driver NVIDIA instalado/alterado; reinicie o Ubuntu e execute o instalador novamente.'
   fi
@@ -415,9 +489,11 @@ main() {
   migrate_and_build
   provision_initial_admin
   install_systemd_unit
+  install_t2u_control_service
   start_stack
   health_check
   print_summary
 }
 
 main "$@"
+

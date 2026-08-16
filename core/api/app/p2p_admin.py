@@ -13,6 +13,7 @@ from .platform import pool, require_admin
 
 FAILOVER_ORCHESTRATOR_URL = os.getenv("FAILOVER_ORCHESTRATOR_URL", "http://failover-orchestrator:8092").rstrip("/")
 FAILOVER_API_TIMEOUT = float(os.getenv("FAILOVER_API_TIMEOUT", "60"))
+T2U_CAPTURE_URL = os.getenv("T2U_CAPTURE_URL", "").rstrip("/")
 router = APIRouter()
 
 
@@ -36,6 +37,28 @@ def orchestrator_call(dvr_id: UUID, body: dict):
         raise HTTPException(status_code=502, detail={"message": "P2P orchestrator rejected request", "upstream_status": exc.code, "upstream": detail[:3000]}) from exc
     except (urllib.error.URLError, TimeoutError) as exc:
         raise HTTPException(status_code=503, detail="P2P/Wine control plane is not active") from exc
+
+
+def t2u_control_call(dvr_id: UUID) -> dict:
+    if not T2U_CAPTURE_URL:
+        raise HTTPException(status_code=409, detail="Intelbras T2U control is not configured")
+    request = urllib.request.Request(
+        f"{T2U_CAPTURE_URL}/v1/dvrs/{dvr_id}/rotate",
+        data=b"{}",
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=150) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="replace")[:1000]
+        raise HTTPException(status_code=502, detail={"message": "T2U bridge restart was rejected", "upstream": detail}) from exc
+    except (urllib.error.URLError, TimeoutError) as exc:
+        raise HTTPException(status_code=503, detail="T2U bridge control is unavailable") from exc
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=502, detail="T2U bridge control returned invalid data")
+    return payload
 
 
 @router.get("/api/v1/admin/p2p/sessions")
@@ -81,13 +104,31 @@ def failover_history(dvr_id: UUID, authorization: str | None = Header(default=No
 def failover_action(dvr_id: UUID, payload: FailoverAction, authorization: str | None = Header(default=None)):
     principal = require_admin(authorization)
     with pool.connection() as conn, conn.cursor() as cur:
-        cur.execute("SELECT id,name,enabled,connection_mode FROM dvrs WHERE id=%s", (dvr_id,))
+        cur.execute(
+            """
+            SELECT d.id,d.name,d.enabled,d.connection_mode,
+                   EXISTS(
+                     SELECT 1 FROM p2p_sessions s
+                      WHERE s.dvr_id=d.id AND s.vendor_session_ref LIKE 't2u:%'
+                        AND s.state='ACTIVE' AND s.ended_at IS NULL
+                   ) AS t2u_active
+              FROM dvrs d WHERE d.id=%s
+            """,
+            (dvr_id,),
+        )
         dvr = cur.fetchone()
         if not dvr:
             raise HTTPException(status_code=404, detail="DVR not found")
         if not dvr["enabled"] or dvr["connection_mode"] != "intelbras_p2p":
             raise HTTPException(status_code=409, detail="DVR is not enabled for Intelbras P2P")
-    result = orchestrator_call(dvr_id, {"actor_type": "USER", "reason": payload.reason, "execute": payload.execute})
+    if dvr["t2u_active"]:
+        result = (
+            t2u_control_call(dvr_id)
+            if payload.execute
+            else {"mode": "PLAN", "execution": "restart authorized T2U bridge and await reconnection"}
+        )
+    else:
+        result = orchestrator_call(dvr_id, {"actor_type": "USER", "reason": payload.reason, "execute": payload.execute})
     if payload.execute:
         with pool.connection() as conn, conn.cursor() as cur:
             cur.execute(
@@ -96,3 +137,4 @@ def failover_action(dvr_id: UUID, payload: FailoverAction, authorization: str | 
             )
             conn.commit()
     return result
+
