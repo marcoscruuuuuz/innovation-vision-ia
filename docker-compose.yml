@@ -53,6 +53,25 @@ services:
       - "127.0.0.1:9001:9001"
     networks: [vision_backend]
 
+  api:
+    build:
+      context: ./core/api
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-vision}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-vision}
+      TZ: ${TZ:-America/Sao_Paulo}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:${VISION_API_PORT:-8080}:8080"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health', timeout=3)"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+    networks: [vision_backend]
+
   prometheus:
     image: prom/prometheus:latest
     restart: unless-stopped
