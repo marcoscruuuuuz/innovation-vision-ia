@@ -8,3 +8,22 @@ services:
       - "host.docker.internal:host-gateway"
     volumes:
       - ./configs/event_catalog.yaml:/app/config/event_catalog.yaml:ro
+
+  clip-builder:
+    build: {context: ./evidence}
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-vision}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-vision}
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-visionminio}
+      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD}
+      MINIO_BUCKET: ${MINIO_EVIDENCE_BUCKET:-vision-evidence}
+      VISION_HOST_GATEWAY: host.docker.internal
+      CLIP_BUILDER_POLL_SECONDS: ${CLIP_BUILDER_POLL_SECONDS:-3}
+      CLIP_BUILDER_MAX_ATTEMPTS: ${CLIP_BUILDER_MAX_ATTEMPTS:-5}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      db-migrate: {condition: service_completed_successfully}
+      minio: {condition: service_started}
+    networks: [vision_backend]
