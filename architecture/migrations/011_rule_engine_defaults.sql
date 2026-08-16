@@ -9,6 +9,8 @@ BEGIN
     SELECT event_type INTO event_name FROM event_rules WHERE id = NEW.event_rule_id;
 
     engine_name := CASE event_name
+        WHEN 'porta_aberta_bloco' THEN 'door_structural_change_temporal'
+        WHEN 'linha_perimetral' THEN 'tracker_temporal'
         WHEN 'cachorro_solto' THEN 'detector_tracker_temporal'
         WHEN 'cachorro_fazendo_fezes' THEN 'detector_pose_temporal_vlm_review'
         WHEN 'entrada_vacuo' THEN 'tracker_temporal'
@@ -26,20 +28,22 @@ BEGIN
         WHEN 'porteiro_dormindo' THEN 'person_pose_inactivity'
         WHEN 'porteiro_fora_posto' THEN 'person_absence_temporal'
         WHEN 'lixo_no_chao' THEN 'person_object_abandonment'
-        WHEN 'porta_aberta_bloco' THEN 'door_structural_change_temporal'
         ELSE 'snapshot_detector'
     END;
 
     NEW.parameters := COALESCE(NEW.parameters, '{}'::jsonb) || jsonb_build_object('engine', engine_name);
 
     IF engine_name IN (
-        'detector_tracker_temporal','detector_pose_temporal_vlm_review','tracker_temporal',
+        'door_structural_change_temporal','tracker_temporal','person_tracker',
+        'detector_tracker_temporal','detector_pose_temporal_vlm_review',
         'child_classifier_object_association','child_classifier_pose_tracker','vehicle_tracker_temporal',
         'vehicle_tracker_direction','motion_scene_change_detector','child_person_ball_association',
         'child_person_kite_temporal','vehicle_plate_detector_ocr_temporal_vote','person_pose_inactivity',
-        'person_absence_temporal','person_object_abandonment','door_structural_change_temporal'
+        'person_absence_temporal','person_object_abandonment'
     ) THEN
         NEW.parameters := NEW.parameters || jsonb_build_object('requires_temporal', true);
+    ELSE
+        NEW.parameters := NEW.parameters - 'requires_temporal';
     END IF;
 
     IF event_name = 'porta_aberta_bloco' THEN
