@@ -21,13 +21,17 @@ jobs:
           python3 -m compileall -q ingestion
           python3 -m compileall -q detection
           python3 -m compileall -q rules
+          python3 -m compileall -q temporal
           python3 -m compileall -q certification
           python3 -m compileall -q notifications
           python3 -m compileall -q ops
           python3 -m compileall -q p2p
+          python3 -m compileall -q evidence
       - name: Validate Compose profiles
         run: |
           docker compose config --quiet
+          docker compose config --services | grep -qx 'temporal-worker'
+          docker compose config --services | grep -qx 'clip-builder'
           ! docker compose config --services | grep -qx 'p2p-supervisor'
           ! docker compose config --services | grep -qx 'stream-broker'
           ! docker compose config --services | grep -qx 'failover-orchestrator'
@@ -37,15 +41,30 @@ jobs:
           docker compose --profile p2p config --services | grep -qx 'failover-orchestrator'
           docker compose --profile p2p config --services | grep -qx 'p2p-watchdog'
       - name: Build core application images
-        run: docker compose build api ingestion-api detection-worker rule-worker certification-worker notification-worker retention-worker portal-admin portal-client
+        run: docker compose build api ingestion-api detection-worker rule-worker temporal-worker certification-worker notification-worker retention-worker clip-builder portal-admin portal-client
       - name: Build final P2P profile images
         run: docker compose --profile p2p build p2p-supervisor stream-broker failover-orchestrator p2p-watchdog
       - name: Validate migrations on PostgreSQL
         run: |
           docker compose up -d postgres
           docker compose run --rm db-migrate
-          docker compose exec -T postgres psql -U vision -d vision -v ON_ERROR_STOP=1 -c "SELECT to_regclass('public.ingestion_events'), to_regclass('public.detection_results'), to_regclass('public.rule_evaluations'), to_regclass('public.event_confidence_policies'), to_regclass('public.user_api_tokens'), to_regclass('public.retention_job_runs'), to_regclass('public.alert_policies'), to_regclass('public.p2p_failover_operations');"
+          # Segunda execução valida a atualização idempotente sobre um banco já migrado.
+          docker compose run --rm db-migrate
+          docker compose exec -T postgres psql -U vision -d vision -v ON_ERROR_STOP=1 -c "SELECT to_regclass('public.ingestion_events'), to_regclass('public.detection_results'), to_regclass('public.rule_evaluations'), to_regclass('public.event_confidence_policies'), to_regclass('public.user_api_tokens'), to_regclass('public.retention_job_runs'), to_regclass('public.alert_policies'), to_regclass('public.p2p_failover_operations'), to_regclass('public.portal_login_audit'), to_regclass('public.evidence_clip_jobs');"
+          docker compose exec -T postgres psql -U vision -d vision -v ON_ERROR_STOP=1 -c "SELECT ip_lan,channel_count FROM dvrs LIMIT 0; SELECT last_login_at FROM users LIMIT 0; SELECT rule_evaluation_id FROM event_candidates LIMIT 0; SELECT proname FROM pg_proc WHERE proname='vision_apply_rule_engine_defaults';"
           docker compose exec -T postgres psql -U vision -d vision -v ON_ERROR_STOP=1 -c "SELECT rolname FROM pg_roles WHERE rolname='vision_portal';"
+      - name: Seed password and tenant fixtures
+        run: |
+          ADMIN_HASH=$(python3 -c "import sys;sys.path.insert(0,'core/api');from app.auth_utils import hash_password;print(hash_password('TestPass123!'))")
+          CLIENT_HASH=$(python3 -c "import sys;sys.path.insert(0,'core/api');from app.auth_utils import hash_password;print(hash_password('ClientPass123!'))")
+          SAFE_ADMIN_HASH=${ADMIN_HASH//\'/\'\'}
+          SAFE_CLIENT_HASH=${CLIENT_HASH//\'/\'\'}
+          {
+            printf "INSERT INTO users(username,password_hash,role,active) VALUES ('ci-admin','%s','admin',true) ON CONFLICT(username) DO UPDATE SET password_hash=excluded.password_hash,role='admin',active=true;\n" "$SAFE_ADMIN_HASH"
+            printf "INSERT INTO condominiums(code,name,active) VALUES ('ci-tenant-a','CI Tenant A',true),('ci-tenant-b','CI Tenant B',true) ON CONFLICT(code) DO UPDATE SET active=true;\n"
+            printf "INSERT INTO users(username,password_hash,role,active) VALUES ('ci-client','%s','client',true) ON CONFLICT(username) DO UPDATE SET password_hash=excluded.password_hash,role='client',active=true;\n" "$SAFE_CLIENT_HASH"
+            printf "INSERT INTO user_condominiums(user_id,condominium_id) SELECT u.id,c.id FROM users u JOIN condominiums c ON c.code='ci-tenant-a' WHERE u.username='ci-client' ON CONFLICT DO NOTHING;\n"
+          } | docker compose exec -T postgres psql -U vision -d vision -v ON_ERROR_STOP=1
       - name: Smoke core HTTP services
         run: |
           wait_url() {
@@ -57,16 +76,33 @@ jobs:
             echo "service did not become ready: $url" >&2
             return 1
           }
-          docker compose up -d redis minio api ingestion-api portal-admin portal-client
+          docker compose up -d redis minio prometheus node-exporter api ingestion-api temporal-worker clip-builder portal-admin portal-client
           wait_url http://127.0.0.1:8080/health
           wait_url http://127.0.0.1:8100/health
           wait_url http://127.0.0.1:8083/
+          wait_url http://127.0.0.1:8083/cadastros.html
+          wait_url http://127.0.0.1:8083/live.html
           wait_url http://127.0.0.1:8083/rules.html
+          wait_url http://127.0.0.1:8083/logs.html
+          wait_url http://127.0.0.1:8083/alerts.html
           wait_url http://127.0.0.1:8083/p2p.html
           wait_url http://127.0.0.1:8084/
-          curl -fsS http://127.0.0.1:8080/health
-          curl -fsS -H 'Authorization: Bearer CHANGE_ME_ADMIN_TOKEN' http://127.0.0.1:8080/api/v1/admin/dashboard
+          curl -fsS -H 'Authorization: Bearer CHANGE_ME_ADMIN_TOKEN' http://127.0.0.1:8080/api/v1/admin/dashboard-full
+          curl -fsS -H 'Authorization: Bearer CHANGE_ME_ADMIN_TOKEN' http://127.0.0.1:8080/api/v1/admin/inventory
+          curl -fsS -H 'Authorization: Bearer CHANGE_ME_ADMIN_TOKEN' http://127.0.0.1:8080/api/v1/admin/event-catalog | grep -q 'porta_aberta_bloco'
+          LOGIN=$(curl -fsS -H 'Content-Type: application/json' -d '{"username":"ci-admin","password":"TestPass123!"}' http://127.0.0.1:8080/api/v1/auth/login)
+          echo "$LOGIN" | grep -q '"role":"admin"'
+          CLIENT_LOGIN=$(curl -fsS -H 'Content-Type: application/json' -d '{"username":"ci-client","password":"ClientPass123!"}' http://127.0.0.1:8080/api/v1/auth/login)
+          echo "$CLIENT_LOGIN" | grep -q '"role":"client"'
+          CLIENT_TOKEN=$(printf '%s' "$CLIENT_LOGIN" | python3 -c "import json,sys; print(json.load(sys.stdin)['token'])")
+          CLIENT_CONDOS=$(curl -fsS -H "Authorization: Bearer $CLIENT_TOKEN" http://127.0.0.1:8080/api/v1/client/condominiums)
+          echo "$CLIENT_CONDOS" | grep -q '"code":"ci-tenant-a"'
+          ! echo "$CLIENT_CONDOS" | grep -q '"code":"ci-tenant-b"'
+          test "$(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $CLIENT_TOKEN" http://127.0.0.1:8080/api/v1/admin/inventory)" = "403"
           curl -fsS http://127.0.0.1:8100/health
+          docker compose ps temporal-worker | grep -q 'Up'
+          docker compose ps clip-builder | grep -q 'Up'
+          test "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8084/api/v1/admin/inventory)" = "404"
       - name: Smoke final P2P control plane with vendor disabled
         run: |
           wait_url() {

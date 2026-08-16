@@ -83,7 +83,9 @@ def process(candidate_id: str):
         )
         log = cur.fetchone()
 
-        if action == "EVIDENCE_LOG":
+        # If the ingest event already carried a real snapshot, preserve it for every approved log.
+        # EVIDENCE_LOG still requires one; TEXT_LOG may attach it opportunistically when available.
+        if candidate.get("snapshot_object_key"):
             cur.execute(
                 """
                 INSERT INTO event_evidence(event_log_id,event_candidate_id,object_key,media_type,sha256)

@@ -1,0 +1,56 @@
+services:
+  api:
+    environment:
+      PROMETHEUS_URL: http://prometheus:9090
+      VISION_EVENT_CATALOG: /app/config/event_catalog.yaml
+      VISION_HOST_GATEWAY: host.docker.internal
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ./configs/event_catalog.yaml:/app/config/event_catalog.yaml:ro
+
+  temporal-worker:
+    build: {context: ./temporal}
+    pull_policy: build
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-vision}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-vision}
+      REDIS_URL: redis://redis:6379/0
+      TEMPORAL_INPUT_STREAM: vision:rule:temporal
+      TEMPORAL_OUTPUT_STREAM: vision:rule:candidates
+      VISION_HOST_GATEWAY: host.docker.internal
+      DETECTOR_HTTP_URL: ${DETECTOR_HTTP_URL:-}
+      TEMPORAL_SPECIALIST_HTTP_URL: ${TEMPORAL_SPECIALIST_HTTP_URL:-}
+      TEMPORAL_MAX_BURST_SECONDS: ${TEMPORAL_MAX_BURST_SECONDS:-20}
+      TEMPORAL_SAMPLE_FPS: ${TEMPORAL_SAMPLE_FPS:-2}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      db-migrate: {condition: service_completed_successfully}
+      redis: {condition: service_healthy}
+    networks: [vision_backend]
+
+  clip-builder:
+    build: {context: ./evidence}
+    pull_policy: build
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-vision}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-vision}
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-visionminio}
+      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD}
+      MINIO_BUCKET: ${MINIO_EVIDENCE_BUCKET:-vision-evidence}
+      VISION_HOST_GATEWAY: host.docker.internal
+      CLIP_BUILDER_POLL_SECONDS: ${CLIP_BUILDER_POLL_SECONDS:-3}
+      CLIP_BUILDER_MAX_ATTEMPTS: ${CLIP_BUILDER_MAX_ATTEMPTS:-5}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      db-migrate: {condition: service_completed_successfully}
+      minio: {condition: service_started}
+    networks: [vision_backend]
+
+  portal-admin:
+    depends_on:
+      temporal-worker: {condition: service_started}
+      clip-builder: {condition: service_started}

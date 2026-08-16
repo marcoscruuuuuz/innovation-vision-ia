@@ -277,8 +277,8 @@ migrate_and_build() {
   if [[ "$REBUILD_IMAGES" == yes ]]; then
     log 'Reconstruindo imagens da aplicacao'
     docker compose --env-file .env build \
-      api ingestion-api detection-worker rule-worker certification-worker \
-      notification-worker retention-worker portal-admin portal-client
+      api ingestion-api detection-worker rule-worker temporal-worker certification-worker \
+      notification-worker retention-worker clip-builder portal-admin portal-client
     if [[ "$ENABLE_P2P" == yes ]]; then
       docker compose --env-file .env --profile p2p build \
         p2p-supervisor stream-broker failover-orchestrator p2p-watchdog
@@ -286,7 +286,7 @@ migrate_and_build() {
   fi
 }
 
-core_services=(postgres redis minio prometheus node-exporter grafana api ingestion-api detection-worker rule-worker certification-worker notification-worker retention-worker portal-admin portal-client)
+core_services=(postgres redis minio prometheus node-exporter grafana api ingestion-api detection-worker rule-worker temporal-worker certification-worker notification-worker retention-worker clip-builder portal-admin portal-client)
 p2p_services=(p2p-supervisor stream-broker failover-orchestrator p2p-watchdog)
 
 install_systemd_unit() {
@@ -348,6 +348,11 @@ health_check() {
     done
     [[ "$ok_flag" == yes ]] || die "health check falhou: ${url}"
     log "OK: ${url}"
+  done
+  for service in temporal-worker clip-builder; do
+    docker compose --env-file .env ps --status running --services "$service" | grep -qx "$service" \
+      || die "worker obrigatorio nao esta em execucao: ${service}"
+    log "OK: worker ${service}"
   done
 }
 

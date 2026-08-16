@@ -9,17 +9,22 @@ DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://vision:vision@postgres:54
 REDIS_URL = os.getenv("REDIS_URL", "redis://redis:6379/0")
 INPUT_STREAM = os.getenv("RULE_INPUT_STREAM", "vision:detection:results")
 OUTPUT_STREAM = os.getenv("RULE_OUTPUT_STREAM", "vision:rule:candidates")
+TEMPORAL_STREAM = os.getenv("RULE_TEMPORAL_STREAM", "vision:rule:temporal")
 CONSUMER_GROUP = os.getenv("RULE_CONSUMER_GROUP", "vision-rules")
 CONSUMER_NAME = os.getenv("RULE_CONSUMER_NAME", "rule-1")
 
 TEMPORAL_ENGINES = {
+    "door_structural_change_temporal",
     "detector_tracker_temporal",
     "detector_pose_temporal_vlm_review",
     "tracker_temporal",
+    "person_tracker",
+    "child_classifier_object_association",
+    "child_classifier_pose_tracker",
     "vehicle_tracker_temporal",
     "vehicle_tracker_direction",
     "motion_scene_change_detector",
-    "child_classifier_pose_tracker",
+    "child_person_ball_association",
     "child_person_kite_temporal",
     "vehicle_plate_detector_ocr_temporal_vote",
     "person_pose_inactivity",
@@ -67,7 +72,6 @@ def geometry_match(geometry: dict | None, bbox: list[float]) -> bool:
     cy = (float(bbox[1]) + float(bbox[3])) / 2.0
     if gtype in ("polygon", "rectangle", "door_roi_with_auto_line"):
         return point_in_polygon(cx, cy, points)
-    # Single-frame line/double-line rules are never positively decided here.
     if gtype in ("line", "double_line", "trigger_line"):
         return False
     return True
@@ -151,20 +155,21 @@ def process(result_id: str):
         )
         rules = cur.fetchall()
         detections = detection["detections"] if isinstance(detection["detections"], list) else json.loads(detection["detections"] or "[]")
+        temporal_jobs = []
         for rule in rules:
             params = rule["parameters"] if isinstance(rule["parameters"], dict) else json.loads(rule["parameters"] or "{}")
             geometry = rule["geometry"] if isinstance(rule["geometry"], dict) else json.loads(rule["geometry"] or "null")
             requirements = rule["model_requirements"] if isinstance(rule["model_requirements"], dict) else json.loads(rule["model_requirements"] or "{}")
             engine = str(params.get("engine") or requirements.get("engine") or "snapshot_detector")
 
-            if detection["status"] == "BLOCKED_MODEL":
-                outcome = "MODEL_REQUIRED"
-                confidence = None
-                details = {"error": detection["error"]}
-            elif engine in TEMPORAL_ENGINES or bool(params.get("requires_temporal")):
+            if engine in TEMPORAL_ENGINES or bool(params.get("requires_temporal")):
                 outcome = "NEEDS_TEMPORAL"
                 confidence = None
-                details = {"processing_mode": detection["processing_mode"], "engine": engine}
+                details = {"processing_mode": detection["processing_mode"], "engine": engine, "snapshot_status": detection["status"]}
+            elif detection["status"] == "BLOCKED_MODEL":
+                outcome = "MODEL_REQUIRED"
+                confidence = None
+                details = {"error": detection["error"], "engine": engine}
             else:
                 best = choose_detection(detections, params, geometry)
                 outcome = "MATCH" if best else "NO_MATCH"
@@ -182,6 +187,9 @@ def process(result_id: str):
                 (detection["id"], rule["version_id"], outcome, confidence, json.dumps(details)),
             )
             evaluation_id = cur.fetchone()["id"]
+            if outcome == "NEEDS_TEMPORAL":
+                temporal_jobs.append((evaluation_id, rule["event_type"], engine))
+                continue
             if outcome != "MATCH":
                 continue
 
@@ -206,6 +214,21 @@ def process(result_id: str):
             candidate_id = cur.fetchone()["id"]
             r.xadd(OUTPUT_STREAM, {"candidate_id": str(candidate_id), "event_type": rule["event_type"], "pipeline_action": action}, maxlen=100000, approximate=True)
         conn.commit()
+
+    for evaluation_id, event_type, engine in temporal_jobs:
+        r.xadd(
+            TEMPORAL_STREAM,
+            {
+                "rule_evaluation_id": str(evaluation_id),
+                "detection_result_id": str(detection["id"]),
+                "ingestion_event_id": str(detection["ingestion_event_id"]),
+                "camera_id": str(camera_id),
+                "event_type": event_type,
+                "engine": engine,
+            },
+            maxlen=100000,
+            approximate=True,
+        )
 
 
 def main():
