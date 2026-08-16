@@ -19,12 +19,13 @@ jobs:
         run: |
           python3 -m compileall -q core/api/app
           python3 -m compileall -q p2p
+          python3 -m compileall -q ingestion
       - name: Validate Compose
         run: docker compose config --quiet
       - name: Build application images
-        run: docker compose build api p2p-supervisor stream-broker
+        run: docker compose build api p2p-supervisor stream-broker ingestion-api
       - name: Validate migrations on PostgreSQL
         run: |
           docker compose up -d postgres
           docker compose run --rm db-migrate
-          docker compose exec -T postgres psql -U vision -d vision -v ON_ERROR_STOP=1 -c "SELECT to_regclass('public.stream_routes'), to_regclass('public.p2p_failover_state');"
+          docker compose exec -T postgres psql -U vision -d vision -v ON_ERROR_STOP=1 -c "SELECT to_regclass('public.stream_routes'), to_regclass('public.p2p_failover_state'), to_regclass('public.ingestion_sources'), to_regclass('public.ingestion_events'), to_regclass('public.ingestion_nonces');"
