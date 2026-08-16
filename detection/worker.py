@@ -4,7 +4,6 @@ import os
 import time
 import urllib.error
 import urllib.request
-from io import BytesIO
 
 import psycopg
 import redis
@@ -69,6 +68,7 @@ def call_backend(image: bytes | None, event: dict) -> tuple[list[dict], float]:
         raise RuntimeError("MODEL_REQUIRED: DETECTOR_HTTP_URL is not configured")
     payload = {
         "contract": "vision.detector.v1",
+        "bbox_space": "normalized_xyxy_0_1",
         "event_id": str(event["id"]),
         "camera_id": str(event["camera_id"]) if event.get("camera_id") else None,
         "event_name": event["event_name"],
@@ -92,6 +92,8 @@ def call_backend(image: bytes | None, event: dict) -> tuple[list[dict], float]:
     elapsed_ms = (time.perf_counter() - started) * 1000.0
     if body.get("contract") != "vision.detector.v1" or body.get("ok") is not True:
         raise RuntimeError(str(body.get("error") or "invalid detector response"))
+    if body.get("bbox_space") not in (None, "normalized_xyxy_0_1"):
+        raise RuntimeError("detector bbox_space must be normalized_xyxy_0_1")
     detections = body.get("detections")
     if not isinstance(detections, list):
         raise RuntimeError("detector response detections must be a list")
@@ -104,7 +106,13 @@ def call_backend(image: bytes | None, event: dict) -> tuple[list[dict], float]:
         bbox = item.get("bbox")
         if not cls or confidence < 0 or confidence > 1 or not isinstance(bbox, list) or len(bbox) != 4:
             continue
-        normalized.append({"class": cls, "confidence": confidence, "bbox": [float(x) for x in bbox], "track_id": item.get("track_id")})
+        try:
+            b = [float(x) for x in bbox]
+        except (TypeError, ValueError):
+            continue
+        if any(x < 0 or x > 1 for x in b) or b[0] >= b[2] or b[1] >= b[3]:
+            continue
+        normalized.append({"class": cls, "confidence": confidence, "bbox": b, "track_id": item.get("track_id")})
     return normalized, elapsed_ms
 
 
