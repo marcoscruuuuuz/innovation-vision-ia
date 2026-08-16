@@ -21,6 +21,27 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
 
+  temporal-worker:
+    build: {context: ./temporal}
+    pull_policy: build
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-vision}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-vision}
+      REDIS_URL: redis://redis:6379/0
+      TEMPORAL_INPUT_STREAM: vision:rule:temporal
+      TEMPORAL_OUTPUT_STREAM: vision:rule:candidates
+      VISION_HOST_GATEWAY: host.docker.internal
+      DETECTOR_HTTP_URL: ${DETECTOR_HTTP_URL:-}
+      TEMPORAL_SPECIALIST_HTTP_URL: ${TEMPORAL_SPECIALIST_HTTP_URL:-}
+      TEMPORAL_MAX_BURST_SECONDS: ${TEMPORAL_MAX_BURST_SECONDS:-20}
+      TEMPORAL_SAMPLE_FPS: ${TEMPORAL_SAMPLE_FPS:-2}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      db-migrate: {condition: service_completed_successfully}
+      redis: {condition: service_healthy}
+    networks: [vision_backend]
+
   clip-builder:
     build: {context: ./evidence}
     pull_policy: build
@@ -43,4 +64,5 @@ services:
 
   portal-admin:
     depends_on:
+      temporal-worker: {condition: service_started}
       clip-builder: {condition: service_started}
