@@ -9,9 +9,15 @@ from .media import router as media_router
 from .camera_media import router as camera_media_router
 from .admin_ops import router as admin_ops_router
 from .p2p_admin import router as p2p_admin_router
+from .operations import router as operations_router
+from .event_catalog import router as event_catalog_router
+from .live import router as live_router
 
 app.include_router(platform_router)
 app.include_router(media_router)
 app.include_router(camera_media_router)
 app.include_router(admin_ops_router)
 app.include_router(p2p_admin_router)
+app.include_router(operations_router)
+app.include_router(event_catalog_router)
+app.include_router(live_router)
