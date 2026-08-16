@@ -9,18 +9,6 @@ services:
     volumes:
       - ./configs/event_catalog.yaml:/app/config/event_catalog.yaml:ro
 
-  certification-worker:
-    environment:
-      MINIO_ENDPOINT: minio:9000
-      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-visionminio}
-      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD}
-      MINIO_BUCKET: ${MINIO_EVIDENCE_BUCKET:-vision-evidence}
-      VISION_HOST_GATEWAY: host.docker.internal
-      VISION_MINI_CLIP_SECONDS: ${VISION_MINI_CLIP_SECONDS:-10}
-      VISION_MAX_MINI_CLIP_SECONDS: ${VISION_MAX_MINI_CLIP_SECONDS:-20}
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
-
   temporal-worker:
     build: {context: ./temporal}
     pull_policy: build
