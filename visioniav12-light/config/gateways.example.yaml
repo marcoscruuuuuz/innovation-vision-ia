@@ -1,0 +1,61 @@
+version: 1
+# Copy to gateways.yaml on the VM. Do not commit credentials.
+# The new VM must communicate with the EXISTING Wine/T2U gateway VMs.
+# Do not shut down the gateway VMs when moving the GPU from the old AI VM.
+
+gateways:
+  - id: gw-prata
+    name: Prata Wine/T2U
+    host: 192.168.1.201
+    api_base_url: http://192.168.1.201:8096
+    auth_token_file: /run/secrets/gateway_auth_token
+    health_path: /health
+    snapshot_path: /v1/snapshot
+    playback_clip_path: /v1/playback-clip
+    capacity_path: /v1/realplay-capacity
+    fixed_endpoints:
+      - dvr_id: prata32
+        condo: PRATA
+        host: 192.168.1.201
+        port: 22455
+        channels: 32
+        main_stream_type: 0
+        sub_stream_type: 1
+        sdk_main_enum: 0
+        sdk_sub_enum: 3
+        max_initial_realplay: 32
+
+  - id: gw-other
+    name: Additional Wine/T2U gateway
+    host: 192.168.1.202
+    api_base_url: http://192.168.1.202:8096
+    auth_token_file: /run/secrets/gateway_auth_token
+    health_path: /health
+    snapshot_path: /v1/snapshot
+    playback_clip_path: /v1/playback-clip
+    fixed_endpoints: []
+
+cameras:
+  - camera_id: prata32-ch01
+    dvr_id: prata32
+    gateway_id: gw-prata
+    channel: 1
+    enabled: true
+    detect_profile: substream
+    snapshot_request:
+      method: POST
+      json:
+        dvr_id: prata32
+        channel: 1
+        stream_type: 1
+    playback_request:
+      method: POST
+      json_template:
+        dvr_id: prata32
+        channel: 1
+        start_at: '{start_at}'
+        end_at: '{end_at}'
+
+# The installer must replace the example IPs, ports and paths from the actual
+# gateway inventory. It must test health, one snapshot and one playback clip
+# before enabling the detector.
