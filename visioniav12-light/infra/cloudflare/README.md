@@ -1,51 +1,111 @@
-# Cloudflare — visioniav12.innovationrptelecom.com.br
+# Cloudflare — `visioniav12.innovationrptelecom.com.br`
 
-## Publicação
+## Tunnel oficial desta implantação
 
-O mesmo hostname publica três superfícies, roteadas pela aplicação:
-
-- `/admin` — administração;
-- `/portal` — cliente;
-- `/api` — API autenticada.
-
-O tunnel aponta o hostname inteiro para `http://api:8080`. A aplicação aplica autenticação e autorização por rota.
-
-## Passos
-
-```bash
-cloudflared tunnel login
-cloudflared tunnel create visioniav12
-cloudflared tunnel route dns visioniav12 visioniav12.innovationrptelecom.com.br
+```text
+Nome: visionia
+ID: b80c0e8d-4ad4-4693-90e1-76b1259d35f2
+Hostname: visioniav12.innovationrptelecom.com.br
+Origin: http://api:8080
 ```
 
-Copie `config.yml.example` para `config.yml`, informe o UUID e coloque o JSON de credencial em `secrets/cloudflared/` apenas na VM.
+Os túneis `condoin` e `isabel-chat-solucao` não pertencem ao V12 Light e não devem ser alterados.
 
-Valide antes de iniciar:
+## Superfícies publicadas
+
+O mesmo hostname publica:
+
+- `/admin` — administração do VISION IA;
+- `/portal` — portal do cliente;
+- `/api` — API autenticada;
+- `/health` — health básico do origin.
+
+PostgreSQL, Redis, MinIO, métricas internas e os endpoints Wine/T2U não são publicados.
+
+## Ativação do conector na VM 206
+
+O token é obtido exclusivamente no painel Cloudflare Zero Trust para o tunnel `visionia`. Ele nunca deve ser enviado ao GitHub, escrito em relatório ou exibido em logs.
+
+Execute na VM 206:
 
 ```bash
-cloudflared tunnel ingress validate
-cloudflared tunnel ingress rule https://visioniav12.innovationrptelecom.com.br/admin
-cloudflared tunnel info visioniav12
+cd /opt/innovation-vision-light/visioniav12-light
+bash infra/cloudflare/activate-visionia.sh
 ```
 
-Suba o profile:
+O script solicita o token de forma silenciosa, salva em:
+
+```text
+secrets/cloudflared/visionia.token
+```
+
+com permissão `0600`, inicia somente o serviço `cloudflared` e valida o origin local.
+
+Também pode receber o segredo apenas no ambiente do processo:
 
 ```bash
-docker compose --profile cloudflare up -d cloudflared
+CLOUDFLARE_TUNNEL_TOKEN='TOKEN_DO_TUNNEL_VISIONIA' \
+  bash infra/cloudflare/activate-visionia.sh
 ```
+
+Não salve esse comando no histórico do shell. O modo interativo é preferível.
+
+## Public hostname no painel
+
+No tunnel `visionia`, configure:
+
+```text
+Public hostname: visioniav12.innovationrptelecom.com.br
+Service:         HTTP
+URL:             api:8080
+```
+
+O `cloudflared` está na mesma rede Docker da API; por isso o origin é `api:8080`, não `127.0.0.1` dentro do container.
 
 ## Cloudflare Access
 
-Criar aplicações Access separadas, mesmo usando o mesmo hostname:
+Crie uma aplicação Access para a administração:
 
-1. `visioniav12-admin`: caminho `/admin*` e, se desejado, `/api/admin*`; permitir somente e-mails/grupos administrativos da INNOVATION RP TELECOM.
-2. `visioniav12-client`: caminho `/portal*`; o login interno da aplicação continua obrigatório.
+```text
+Nome: visionia-v12-admin
+Hostname: visioniav12.innovationrptelecom.com.br
+Path: /admin*
+```
 
-Não publicar MinIO, PostgreSQL, Redis, métricas internas ou endpoints Wine/T2U pela Internet.
+Opcionalmente inclua `/api/admin*` em uma segunda aplicação ou política equivalente.
+
+A política deve permitir somente e-mails ou grupos administrativos da INNOVATION RP TELECOM.
+
+O `/portal` continua protegido pela autenticação da própria aplicação e pela ACL por condomínio. Cloudflare Access adicional no portal é opcional.
+
+## Verificação
+
+Depois da ativação:
+
+```bash
+docker compose --profile cloudflare ps
+docker compose --profile cloudflare logs --tail=100 cloudflared
+curl -I https://visioniav12.innovationrptelecom.com.br/portal
+curl -I https://visioniav12.innovationrptelecom.com.br/admin
+```
+
+Estados esperados:
+
+```text
+cloudflared = running
+replica count >= 1
+/portal = HTTP 200 ou fluxo de autenticação da aplicação
+/admin = política Access antes da aplicação
+```
+
+## Alternativa local-managed
+
+`config.yml.example` permanece apenas como referência para um tunnel local-managed. A implantação oficial usa o token do tunnel remoto `visionia` através do `--token-file` no Docker Compose.
 
 ## Segurança
 
-- O JSON do tunnel e tokens nunca entram no Git.
-- Cookies da aplicação devem ser `Secure`, `HttpOnly` e `SameSite=Lax/Strict` conforme a rota.
-- O último ingress deve ser `http_status:404`.
-- O tunnel é outbound-only; não abrir a porta 8080 no roteador.
+- Nunca versionar token ou credencial JSON.
+- Não abrir a porta 8080 no roteador.
+- Não publicar MinIO, PostgreSQL, Redis ou gateways.
+- Preservar o catch-all/negação no Cloudflare quando usar regras adicionais.
+- Revogar e rotacionar o token se ele for exibido acidentalmente.
