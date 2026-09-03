@@ -105,6 +105,7 @@ Public portal: https://visioniav12.innovationrptelecom.com.br/portal
 Credentials:   ${ROOT_DIR}/secrets/initial-access-credentials.txt
 
 The administration, camera status, user management, rule editor and ROI editor are active.
-The production event writer remains controlled by PRODUCTION_WRITER_ENABLED and must
-only be enabled after the first real rule/media promotion through the administration.
+The production media writer is active for rules explicitly saved as PRODUCTION.
+Rules marked DRAFT, SHADOW or HOMOLOGATION remain non-visible, and rules that require
+certification remain fail-closed until certification_status=APPROVED.
 EOF
