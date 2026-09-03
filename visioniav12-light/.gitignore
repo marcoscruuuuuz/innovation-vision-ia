@@ -1,0 +1,13 @@
+.env
+config/gateways.yaml
+infra/cloudflare/config.yml
+secrets/
+models/*.pt
+models/*.onnx
+models/*.engine
+__pycache__/
+.pytest_cache/
+*.pyc
+*.log
+reports/
+data/
