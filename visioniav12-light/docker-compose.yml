@@ -1,0 +1,190 @@
+name: visioniav12-light
+
+x-app-env: &app-env
+  APP_ENV: ${APP_ENV:-production}
+  APP_NAME: ${APP_NAME:-INNOVATION VISION IA V12 LIGHT}
+  APP_SECRET_KEY: ${APP_SECRET_KEY:?set APP_SECRET_KEY}
+  JWT_EXPIRE_MINUTES: ${JWT_EXPIRE_MINUTES:-480}
+  TZ: ${TZ:-America/Sao_Paulo}
+  DATABASE_URL: ${DATABASE_URL:?set DATABASE_URL}
+  REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+  REDIS_PREFIX: ${REDIS_PREFIX:-vl:}
+  MINIO_ENDPOINT: ${MINIO_ENDPOINT:-minio:9000}
+  MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:?set MINIO_ROOT_USER}
+  MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:?set MINIO_ROOT_PASSWORD}
+  MINIO_SECURE: ${MINIO_SECURE:-false}
+  MINIO_BUCKET: ${MINIO_BUCKET:-vision-light}
+  GATEWAY_REGISTRY_FILE: ${GATEWAY_REGISTRY_FILE:-/config/gateways.yaml}
+  YOLO_MODEL: ${YOLO_MODEL:-/models/yolo11n.pt}
+  YOLO_POSE_MODEL: ${YOLO_POSE_MODEL:-/models/yolo11n-pose.pt}
+  YOLO_DEVICE: ${YOLO_DEVICE:-0}
+  YOLO_IMGSZ: ${YOLO_IMGSZ:-640}
+  YOLO_BATCH_SIZE: ${YOLO_BATCH_SIZE:-16}
+  YOLO_BATCH_WAIT_MS: ${YOLO_BATCH_WAIT_MS:-120}
+  YOLO_CONFIDENCE: ${YOLO_CONFIDENCE:-0.25}
+  MAX_FRAME_AGE_S: ${MAX_FRAME_AGE_S:-10}
+  POSE_EVERY_N: ${POSE_EVERY_N:-5}
+  DETECT_FPS: ${DETECT_FPS:-2}
+  DETECT_WIDTH: ${DETECT_WIDTH:-960}
+  DETECT_HEIGHT: ${DETECT_HEIGHT:-540}
+  RULE_REFRESH_S: ${RULE_REFRESH_S:-5}
+  CLIP_PRE_SECONDS: ${CLIP_PRE_SECONDS:-5}
+  CLIP_POST_SECONDS: ${CLIP_POST_SECONDS:-10}
+  CLIP_TARGET_SECONDS: ${CLIP_TARGET_SECONDS:-15}
+  PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-https://visioniav12.innovationrptelecom.com.br}
+  PRODUCTION_WRITER_ENABLED: ${PRODUCTION_WRITER_ENABLED:-false}
+  ALLOW_MANUAL_EVENT_INSERT: "false"
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-vision_light}
+      POSTGRES_USER: ${POSTGRES_USER:-vision_light}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+      TZ: ${TZ:-America/Sao_Paulo}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-vision_light} -d ${POSTGRES_DB:-vision_light}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    networks: [vision_light]
+
+  redis:
+    image: redis:7.4-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes", "--save", "60", "1000"]
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    networks: [vision_light]
+
+  minio:
+    image: minio/minio:RELEASE.2025-07-23T15-54-02Z
+    restart: unless-stopped
+    command: server /data --console-address :9001
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:?set MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?set MINIO_ROOT_PASSWORD}
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:9000/minio/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+    networks: [vision_light]
+
+  api:
+    build:
+      context: ./app
+      args:
+        ULTRALYTICS_IMAGE: ${ULTRALYTICS_IMAGE:-ultralytics/ultralytics:latest}
+    restart: unless-stopped
+    command: ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8080", "--workers", "2"]
+    environment:
+      <<: *app-env
+      INITIAL_ADMIN_EMAIL: ${INITIAL_ADMIN_EMAIL:?set INITIAL_ADMIN_EMAIL}
+      INITIAL_ADMIN_PASSWORD: ${INITIAL_ADMIN_PASSWORD:?set INITIAL_ADMIN_PASSWORD}
+    volumes:
+      - ./config:/config:ro
+      - ./models:/models
+      - media_tmp:/tmp/vision-light
+    ports:
+      - "127.0.0.1:8080:8080"
+    depends_on:
+      postgres: {condition: service_healthy}
+      redis: {condition: service_healthy}
+      minio: {condition: service_healthy}
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+    networks: [vision_light]
+
+  ingest:
+    build:
+      context: ./app
+      args:
+        ULTRALYTICS_IMAGE: ${ULTRALYTICS_IMAGE:-ultralytics/ultralytics:latest}
+    restart: unless-stopped
+    command: ["python", "gateway.py"]
+    environment:
+      <<: *app-env
+    volumes:
+      - ./config:/config:ro
+      - media_tmp:/tmp/vision-light
+      - gateway_secrets:/run/secrets:ro
+    depends_on:
+      redis: {condition: service_healthy}
+    networks: [vision_light]
+
+  detector:
+    build:
+      context: ./app
+      args:
+        ULTRALYTICS_IMAGE: ${ULTRALYTICS_IMAGE:-ultralytics/ultralytics:latest}
+    restart: unless-stopped
+    command: ["python", "engine.py"]
+    environment:
+      <<: *app-env
+      NVIDIA_VISIBLE_DEVICES: all
+      NVIDIA_DRIVER_CAPABILITIES: compute,utility,video
+    gpus: all
+    volumes:
+      - ./config:/config:ro
+      - ./models:/models
+    depends_on:
+      redis: {condition: service_healthy}
+      postgres: {condition: service_healthy}
+    networks: [vision_light]
+
+  media:
+    build:
+      context: ./app
+      args:
+        ULTRALYTICS_IMAGE: ${ULTRALYTICS_IMAGE:-ultralytics/ultralytics:latest}
+    restart: unless-stopped
+    command: ["python", "media_worker.py"]
+    environment:
+      <<: *app-env
+    volumes:
+      - ./config:/config:ro
+      - media_tmp:/tmp/vision-light
+      - gateway_secrets:/run/secrets:ro
+    depends_on:
+      redis: {condition: service_healthy}
+      postgres: {condition: service_healthy}
+      minio: {condition: service_healthy}
+    networks: [vision_light]
+
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    profiles: ["cloudflare"]
+    restart: unless-stopped
+    command: tunnel --no-autoupdate --config /etc/cloudflared/config.yml run
+    volumes:
+      - ./infra/cloudflare/config.yml:/etc/cloudflared/config.yml:ro
+      - ./secrets/cloudflared:/etc/cloudflared/secrets:ro
+    depends_on:
+      api: {condition: service_healthy}
+    networks: [vision_light]
+
+networks:
+  vision_light:
+    name: vision-light
+
+volumes:
+  postgres_data:
+  redis_data:
+  minio_data:
+  media_tmp:
+  gateway_secrets:
