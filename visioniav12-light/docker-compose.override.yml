@@ -2,6 +2,9 @@ services:
   api:
     command: ["uvicorn", "main_v2:app", "--host", "0.0.0.0", "--port", "8080", "--workers", "2"]
 
+  ingest:
+    command: ["python", "gateway_v2.py"]
+
   rules:
     build:
       context: ./app
@@ -26,6 +29,7 @@ services:
       - vision_light
 
   media:
+    command: ["python", "media_worker_v2.py"]
     depends_on:
       postgres:
         condition: service_healthy
