@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import hashlib
 import logging
 import os
 import time
@@ -23,6 +24,7 @@ REGISTRY_FILE = Path(os.getenv("GATEWAY_REGISTRY_FILE", "/config/gateways.yaml")
 DETECT_FPS = float(os.getenv("DETECT_FPS", "2"))
 CONNECT_TIMEOUT = float(os.getenv("GATEWAY_CONNECT_TIMEOUT_S", "5"))
 READ_TIMEOUT = float(os.getenv("GATEWAY_READ_TIMEOUT_S", "35"))
+LATEST_FRAME_TTL_S = int(os.getenv("LATEST_FRAME_TTL_S", "30"))
 
 
 def load_registry() -> dict[str, Any]:
@@ -81,26 +83,39 @@ async def camera_loop(
         try:
             jpeg = await fetch_snapshot(http_client, camera, gateway)
             capture_ts = time.time()
+            encoded = base64.b64encode(jpeg).decode()
+            digest = hashlib.sha256(jpeg).hexdigest()
             await redis_client.xadd(
                 FRAME_STREAM,
                 {
                     "camera_id": camera_id,
                     "capture_ts": f"{capture_ts:.6f}",
-                    "jpeg_b64": base64.b64encode(jpeg).decode(),
+                    "jpeg_b64": encoded,
                 },
                 maxlen=10_000,
                 approximate=True,
+            )
+            # The editor needs a current frame, but raw images must never become
+            # long-term storage. This key is overwritten per camera and expires.
+            await redis_client.set(
+                f"{PREFIX}camera:{camera_id}:latest_jpeg_b64",
+                encoded,
+                ex=max(5, LATEST_FRAME_TTL_S),
             )
             await redis_client.hset(
                 f"{PREFIX}camera:{camera_id}:health",
                 mapping={
                     "last_frame_at": capture_ts,
                     "jpeg_bytes": len(jpeg),
+                    "jpeg_sha256": digest,
                     "failures": 0,
                     "gateway_id": camera["gateway_id"],
+                    "dvr_id": camera.get("dvr_id", ""),
+                    "channel": camera.get("channel", ""),
+                    "runtime_state": "ONLINE",
                 },
             )
-            await redis_client.expire(f"{PREFIX}camera:{camera_id}:health", 30)
+            await redis_client.expire(f"{PREFIX}camera:{camera_id}:health", max(30, LATEST_FRAME_TTL_S))
             failures = 0
         except asyncio.CancelledError:
             raise
@@ -109,9 +124,17 @@ async def camera_loop(
             LOG.warning("snapshot failed camera=%s failures=%s error=%s", camera_id, failures, exc)
             await redis_client.hset(
                 f"{PREFIX}camera:{camera_id}:health",
-                mapping={"last_error": str(exc), "failures": failures, "updated_at": time.time()},
+                mapping={
+                    "last_error": str(exc),
+                    "failures": failures,
+                    "updated_at": time.time(),
+                    "gateway_id": camera.get("gateway_id", ""),
+                    "dvr_id": camera.get("dvr_id", ""),
+                    "channel": camera.get("channel", ""),
+                    "runtime_state": "DEGRADED",
+                },
             )
-            await redis_client.expire(f"{PREFIX}camera:{camera_id}:health", 30)
+            await redis_client.expire(f"{PREFIX}camera:{camera_id}:health", max(30, LATEST_FRAME_TTL_S))
             await asyncio.sleep(min(30.0, 0.5 * (2 ** min(failures, 6))))
         elapsed = time.monotonic() - started
         await asyncio.sleep(max(0.0, interval - elapsed))
@@ -133,7 +156,15 @@ async def main() -> None:
             tasks.append(asyncio.create_task(camera_loop(redis_client, http_client, camera, gateway)))
         if not tasks:
             raise RuntimeError("no enabled cameras with valid gateways")
-        await redis_client.hset(HEALTH_KEY, mapping={"started_at": time.time(), "camera_tasks": len(tasks)})
+        await redis_client.hset(
+            HEALTH_KEY,
+            mapping={
+                "started_at": time.time(),
+                "camera_tasks": len(tasks),
+                "state": "RUNNING",
+                "latest_frame_ttl_s": LATEST_FRAME_TTL_S,
+            },
+        )
         await asyncio.gather(*tasks)
 
 
