@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex,nofollow">
+  <title>INNOVATION VISION IA · Portal do Cliente</title>
+  <link rel="stylesheet" href="/assets/app.css">
+</head>
+<body>
+  <section id="loginView" class="login-shell">
+    <form id="loginForm" class="login-card">
+      <div class="brand-mark">IV</div>
+      <h1>Portal do Cliente</h1>
+      <p>Acompanhe câmeras, eventos certificados, snapshots e clipes de 15 segundos dos condomínios autorizados.</p>
+      <div class="field"><label for="loginEmail">E-mail</label><input id="loginEmail" type="email" autocomplete="username" required></div>
+      <div class="field"><label for="loginPassword">Senha</label><input id="loginPassword" type="password" autocomplete="current-password" required></div>
+      <button class="btn btn-primary full" type="submit">Entrar no portal</button>
+      <div id="loginError" class="error"></div>
+    </form>
+  </section>
+
+  <div id="appView" class="app-shell hidden">
+    <aside class="sidebar">
+      <div class="sidebar-brand"><strong>INNOVATION VISION IA</strong><span>V12 Light · Portal do Cliente</span></div>
+      <nav id="portalNav" class="nav">
+        <button class="active" data-view="dashboard">Dashboard</button>
+        <button data-view="cameras">Câmeras</button>
+        <button data-view="events">Eventos</button>
+      </nav>
+      <div class="sidebar-footer"><div id="sidebarUser">—</div><div id="sidebarScope">—</div></div>
+    </aside>
+
+    <main class="workspace">
+      <header class="topbar">
+        <div><h1 id="pageTitle">Dashboard</h1></div>
+        <div class="topbar-actions"><span class="env-pill" id="scopePill">Cliente</span><span class="user-pill" id="topUser">—</span><button id="logoutButton" class="btn btn-ghost btn-sm">Sair</button></div>
+      </header>
+
+      <div class="content">
+        <section id="view-dashboard" class="view active">
+          <div class="view-head"><div><h2>Visão do condomínio</h2><p>Câmeras e eventos autorizados para sua conta.</p></div><div class="actions"><button id="refreshDashboard" class="btn btn-blue">Atualizar</button></div></div>
+          <div class="cards">
+            <div class="card"><div class="label">Câmeras</div><div class="value" id="dashTotal">—</div><div class="hint">Total autorizado</div></div>
+            <div class="card"><div class="label">Online</div><div class="value" id="dashOnline">—</div><div class="hint">Com frame recente</div></div>
+            <div class="card"><div class="label">Degradadas</div><div class="value" id="dashDegraded">—</div><div class="hint">Operação parcial</div></div>
+            <div class="card"><div class="label">Offline</div><div class="value" id="dashOffline">—</div><div class="hint">Sem frame recente</div></div>
+            <div class="card"><div class="label">Eventos</div><div class="value" id="dashLogs">—</div><div class="hint">Logs visíveis</div></div>
+          </div>
+          <div class="grid-2">
+            <div class="panel"><h3>Últimos eventos</h3><div id="recentEvents"></div></div>
+            <div class="panel"><h3>Estado das câmeras</h3><div id="cameraStateSummary"></div></div>
+          </div>
+        </section>
+
+        <section id="view-cameras" class="view">
+          <div class="view-head"><div><h2>Câmeras</h2><p>Status atualizado das câmeras dentro do seu escopo.</p></div><div class="actions"><button id="refreshCameras" class="btn btn-blue">Atualizar</button></div></div>
+          <div class="panel">
+            <div class="toolbar"><input id="cameraSearch" placeholder="Buscar câmera, condomínio ou DVR"><select id="cameraState"><option value="">Todos os estados</option><option>ONLINE</option><option>DEGRADED</option><option>OFFLINE</option></select></div>
+            <div id="cameraGrid" class="camera-grid"></div>
+          </div>
+        </section>
+
+        <section id="view-events" class="view">
+          <div class="view-head"><div><h2>Eventos e evidências</h2><p>Somente eventos visíveis, autorizados e com mídia disponível.</p></div><div class="actions"><button id="refreshEvents" class="btn btn-blue">Atualizar</button></div></div>
+          <div class="panel">
+            <div class="toolbar"><input id="eventSearch" placeholder="Buscar evento, câmera ou condomínio"><select id="eventCondo"><option value="">Todos os condomínios</option></select></div>
+            <div class="table-wrap"><table><thead><tr><th>Data</th><th>Condomínio</th><th>Câmera</th><th>Evento</th><th>Confiança</th><th>Evidências</th></tr></thead><tbody id="eventRows"></tbody></table></div>
+          </div>
+        </section>
+      </div>
+    </main>
+  </div>
+
+  <div id="mediaModal" class="modal-backdrop hidden"><div class="modal"><div class="modal-head"><strong id="modalTitle">Evidência</strong><button id="closeModal" class="btn btn-danger btn-sm">Fechar</button></div><div id="modalBody"></div></div></div>
+  <div id="toastStack" class="toast-stack"></div>
+  <script src="/assets/portal.js" defer></script>
+</body>
+</html>
