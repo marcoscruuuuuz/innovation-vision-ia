@@ -29,7 +29,7 @@ services:
       - vision_light
 
   media:
-    command: ["python", "media_worker_v2.py"]
+    command: ["python", "media_worker_v3.py"]
     depends_on:
       postgres:
         condition: service_healthy
