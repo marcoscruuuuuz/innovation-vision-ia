@@ -62,6 +62,7 @@ def media_proxy(
     return StreamingResponse(object_stream(response), media_type=media_type, headers=headers)
 
 
-# Registers the production administration, client portal, camera status,
-# user management and deterministic ROI editor routes on the same app.
+# Registers local first-access provisioning, then the production administration,
+# client portal, camera status, user management and deterministic ROI editor.
+import access_bootstrap  # noqa: E402,F401
 import ui_v3  # noqa: E402,F401
