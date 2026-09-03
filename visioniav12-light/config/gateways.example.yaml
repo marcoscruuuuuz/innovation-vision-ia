@@ -1,6 +1,6 @@
 version: 1
 # Copy to gateways.yaml on the VM. Do not commit credentials.
-# The new VM must communicate with the EXISTING Wine/T2U gateway VMs.
+# The new VM communicates with the EXISTING Wine/T2U gateway VMs.
 # Do not shut down the gateway VMs when moving the GPU from the old AI VM.
 
 gateways:
@@ -10,9 +10,10 @@ gateways:
     api_base_url: http://192.168.1.201:8096
     auth_token_file: /run/secrets/gateway_auth_token
     health_path: /health
-    snapshot_path: /v1/snapshot
-    playback_clip_path: /v1/playback-clip
-    capacity_path: /v1/realplay-capacity
+    snapshot_path: /v1/cameras/{gateway_camera_id}/snapshot
+    playback_clip_path: /v1/cameras/{gateway_camera_id}/playback-clip
+    # Optional. Keep absent until the real gateway exposes and validates this route.
+    capacity_path: null
     fixed_endpoints:
       - dvr_id: prata32
         condo: PRATA
@@ -31,12 +32,16 @@ gateways:
     api_base_url: http://192.168.1.202:8096
     auth_token_file: /run/secrets/gateway_auth_token
     health_path: /health
-    snapshot_path: /v1/snapshot
-    playback_clip_path: /v1/playback-clip
+    snapshot_path: /v1/cameras/{gateway_camera_id}/snapshot
+    playback_clip_path: /v1/cameras/{gateway_camera_id}/playback-clip
     fixed_endpoints: []
 
 cameras:
   - camera_id: prata32-ch01
+    # UUID of the SAME camera in the existing gateway database/API.
+    gateway_camera_id: REPLACE_WITH_CURRENT_CAMERA_UUID
+    name: Prata32 Canal 01
+    condo: PRATA
     dvr_id: prata32
     gateway_id: gw-prata
     channel: 1
@@ -44,18 +49,12 @@ cameras:
     detect_profile: substream
     snapshot_request:
       method: POST
-      json:
-        dvr_id: prata32
-        channel: 1
-        stream_type: 1
     playback_request:
       method: POST
       json_template:
-        dvr_id: prata32
-        channel: 1
         start_at: '{start_at}'
         end_at: '{end_at}'
 
-# The installer must replace the example IPs, ports and paths from the actual
-# gateway inventory. It must test health, one snapshot and one playback clip
-# before enabling the detector.
+# The installer must replace example IPs, ports, UUIDs and route/body fields
+# from the actual gateway inventory. Before enabling the detector it must prove:
+# health, one JPEG snapshot, one 15-second playback clip and no extra LoginEx2.
