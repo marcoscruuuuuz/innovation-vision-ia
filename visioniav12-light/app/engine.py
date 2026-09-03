@@ -6,7 +6,6 @@ import logging
 import os
 import signal
 import time
-from collections import defaultdict
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
@@ -81,6 +80,12 @@ def normalized_bbox(xyxy: np.ndarray, width: int, height: int) -> tuple[float, f
     )
 
 
+def write_health(client: redis.Redis, **values: object) -> None:
+    mapping = {"timestamp": time.time(), **values}
+    client.hset(HEALTH_KEY, mapping=mapping)
+    client.expire(HEALTH_KEY, 15)
+
+
 def main() -> None:
     signal.signal(signal.SIGTERM, stop_handler)
     signal.signal(signal.SIGINT, stop_handler)
@@ -110,7 +115,7 @@ def main() -> None:
 
         due = len(latest) >= BATCH_SIZE or (latest and time.monotonic() - batch_started_at >= BATCH_WAIT_S)
         if not due:
-            client.setex(HEALTH_KEY, 15, str(time.time()))
+            write_health(client, state="waiting", batch_size=0, latest_pending=len(latest))
             continue
 
         selected = sorted(latest.values(), key=lambda item: item.capture_ts)[:BATCH_SIZE]
@@ -131,6 +136,7 @@ def main() -> None:
             )
         except Exception:
             LOG.exception("YOLO inference failed")
+            write_health(client, state="inference_error", batch_size=len(selected), latest_pending=len(latest))
             time.sleep(1)
             continue
         inference_ms = (time.perf_counter() - started) * 1000.0
@@ -213,16 +219,13 @@ def main() -> None:
                 approximate=True,
             )
 
-        client.hset(
-            HEALTH_KEY,
-            mapping={
-                "timestamp": time.time(),
-                "batch_size": len(selected),
-                "inference_ms": inference_ms,
-                "latest_pending": len(latest),
-            },
+        write_health(
+            client,
+            state="running",
+            batch_size=len(selected),
+            inference_ms=inference_ms,
+            latest_pending=len(latest),
         )
-        client.expire(HEALTH_KEY, 15)
 
     LOG.info("detector stopped")
 
