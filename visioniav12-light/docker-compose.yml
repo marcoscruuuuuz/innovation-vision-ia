@@ -14,6 +14,7 @@ x-app-env: &app-env
   MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:?set MINIO_ROOT_PASSWORD}
   MINIO_SECURE: ${MINIO_SECURE:-false}
   MINIO_BUCKET: ${MINIO_BUCKET:-vision-light}
+  MEDIA_RETENTION_DAYS: ${MEDIA_RETENTION_DAYS:-7}
   GATEWAY_REGISTRY_FILE: ${GATEWAY_REGISTRY_FILE:-/config/gateways.yaml}
   YOLO_MODEL: ${YOLO_MODEL:-/models/yolo11n.pt}
   YOLO_POSE_MODEL: ${YOLO_POSE_MODEL:-/models/yolo11n-pose.pt}
@@ -28,9 +29,13 @@ x-app-env: &app-env
   DETECT_WIDTH: ${DETECT_WIDTH:-960}
   DETECT_HEIGHT: ${DETECT_HEIGHT:-540}
   RULE_REFRESH_S: ${RULE_REFRESH_S:-5}
+  CAMERA_ONLINE_MAX_AGE_S: ${CAMERA_ONLINE_MAX_AGE_S:-20}
+  LATEST_FRAME_TTL_S: ${LATEST_FRAME_TTL_S:-30}
   CLIP_PRE_SECONDS: ${CLIP_PRE_SECONDS:-5}
   CLIP_POST_SECONDS: ${CLIP_POST_SECONDS:-10}
   CLIP_TARGET_SECONDS: ${CLIP_TARGET_SECONDS:-15}
+  FFPROBE_DURATION_MIN: ${FFPROBE_DURATION_MIN:-14.5}
+  FFPROBE_DURATION_MAX: ${FFPROBE_DURATION_MAX:-15.5}
   PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-https://visioniav12.innovationrptelecom.com.br}
   PRODUCTION_WRITER_ENABLED: ${PRODUCTION_WRITER_ENABLED:-false}
   ALLOW_MANUAL_EVENT_INSERT: "false"
@@ -88,11 +93,15 @@ services:
       args:
         ULTRALYTICS_IMAGE: ${ULTRALYTICS_IMAGE:-ultralytics/ultralytics:latest}
     restart: unless-stopped
-    command: ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8080", "--workers", "2"]
+    command: ["uvicorn", "main_v2:app", "--host", "0.0.0.0", "--port", "8080", "--workers", "2"]
     environment:
       <<: *app-env
       INITIAL_ADMIN_EMAIL: ${INITIAL_ADMIN_EMAIL:?set INITIAL_ADMIN_EMAIL}
       INITIAL_ADMIN_PASSWORD: ${INITIAL_ADMIN_PASSWORD:?set INITIAL_ADMIN_PASSWORD}
+      INITIAL_CLIENT_EMAIL: ${INITIAL_CLIENT_EMAIL:-}
+      INITIAL_CLIENT_PASSWORD: ${INITIAL_CLIENT_PASSWORD:-}
+      INITIAL_CLIENT_CONDO_SCOPE: ${INITIAL_CLIENT_CONDO_SCOPE:-}
+      ACCESS_BOOTSTRAP_STATUS_FILE: ${ACCESS_BOOTSTRAP_STATUS_FILE:-/tmp/vision-light-access-bootstrap.json}
     volumes:
       - ./config:/config:ro
       - ./models:/models
@@ -116,13 +125,13 @@ services:
       args:
         ULTRALYTICS_IMAGE: ${ULTRALYTICS_IMAGE:-ultralytics/ultralytics:latest}
     restart: unless-stopped
-    command: ["python", "gateway.py"]
+    command: ["python", "gateway_v2.py"]
     environment:
       <<: *app-env
     volumes:
       - ./config:/config:ro
       - media_tmp:/tmp/vision-light
-      - gateway_secrets:/run/secrets:ro
+      - ./secrets/gateway:/run/secrets:ro
     depends_on:
       redis: {condition: service_healthy}
     networks: [vision_light]
@@ -153,13 +162,13 @@ services:
       args:
         ULTRALYTICS_IMAGE: ${ULTRALYTICS_IMAGE:-ultralytics/ultralytics:latest}
     restart: unless-stopped
-    command: ["python", "media_worker.py"]
+    command: ["python", "media_worker_v3.py"]
     environment:
       <<: *app-env
     volumes:
       - ./config:/config:ro
       - media_tmp:/tmp/vision-light
-      - gateway_secrets:/run/secrets:ro
+      - ./secrets/gateway:/run/secrets:ro
     depends_on:
       redis: {condition: service_healthy}
       postgres: {condition: service_healthy}
@@ -170,10 +179,14 @@ services:
     image: cloudflare/cloudflared:latest
     profiles: ["cloudflare"]
     restart: unless-stopped
-    command: tunnel --no-autoupdate --config /etc/cloudflared/config.yml run
+    command:
+      - tunnel
+      - --no-autoupdate
+      - run
+      - --token-file
+      - /run/secrets/cloudflared/visionia.token
     volumes:
-      - ./infra/cloudflare/config.yml:/etc/cloudflared/config.yml:ro
-      - ./secrets/cloudflared:/etc/cloudflared/secrets:ro
+      - ./secrets/cloudflared/visionia.token:/run/secrets/cloudflared/visionia.token:ro
     depends_on:
       api: {condition: service_healthy}
     networks: [vision_light]
@@ -187,4 +200,3 @@ volumes:
   redis_data:
   minio_data:
   media_tmp:
-  gateway_secrets:
