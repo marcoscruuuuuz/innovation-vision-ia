@@ -86,7 +86,9 @@ values = {
     "CLOUDFLARE_TUNNEL_NAME": "visionia",
     "CLOUDFLARE_TUNNEL_UUID": "b80c0e8d-4ad4-4693-90e1-76b1259d35f2",
     "PUBLIC_BASE_URL": "https://visioniav12.innovationrptelecom.com.br",
-    "PRODUCTION_WRITER_ENABLED": "false",
+    # Only rules explicitly saved as PRODUCTION can reach the media writer.
+    # Critical rules still remain fail-closed when certification is required.
+    "PRODUCTION_WRITER_ENABLED": "true",
     "ALLOW_MANUAL_EVENT_INSERT": "false",
     "GLOBAL_WINE_T2U_RESTART_ALLOWED": "false",
 }
@@ -141,5 +143,6 @@ Production secrets created locally.
 Environment: ${ENV_FILE}
 Initial credentials: ${CREDENTIAL_FILE}
 Client scope: ${CLIENT_SCOPE}
-Production writer remains disabled until a real media/rule canary passes.
+Production media writer is enabled only for rules explicitly promoted to PRODUCTION.
+Critical rules remain fail-closed until their certification status is APPROVED.
 EOF
