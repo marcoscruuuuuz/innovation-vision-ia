@@ -1,0 +1,12 @@
+# Copy to config.yml only on the VM. Do not commit credentials.
+tunnel: REPLACE_WITH_TUNNEL_UUID
+credentials-file: /etc/cloudflared/secrets/REPLACE_WITH_TUNNEL_UUID.json
+
+originRequest:
+  connectTimeout: 10s
+  httpHostHeader: visioniav12.innovationrptelecom.com.br
+
+ ingress:
+  - hostname: visioniav12.innovationrptelecom.com.br
+    service: http://api:8080
+  - service: http_status:404
