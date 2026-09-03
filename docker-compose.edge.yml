@@ -1,0 +1,27 @@
+services:
+  edge:
+    build: {context: ./edge}
+    restart: unless-stopped
+    depends_on:
+      api: {condition: service_healthy}
+      portal-admin: {condition: service_started}
+      portal-client: {condition: service_started}
+    ports:
+      - "127.0.0.1:${VISION_EDGE_PORT:-8088}:8088"
+    networks: [vision_backend]
+
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    profiles: ["cloudflare"]
+    restart: unless-stopped
+    command:
+      - tunnel
+      - --no-autoupdate
+      - run
+      - --token-file
+      - /run/secrets/cloudflared/visionia.token
+    volumes:
+      - ./secrets/cloudflared/visionia.token:/run/secrets/cloudflared/visionia.token:ro
+    depends_on:
+      edge: {condition: service_healthy}
+    networks: [vision_backend]
