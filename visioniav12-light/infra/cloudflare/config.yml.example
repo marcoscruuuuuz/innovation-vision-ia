@@ -6,7 +6,7 @@ originRequest:
   connectTimeout: 10s
   httpHostHeader: visioniav12.innovationrptelecom.com.br
 
- ingress:
+ingress:
   - hostname: visioniav12.innovationrptelecom.com.br
     service: http://api:8080
   - service: http_status:404
