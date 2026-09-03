@@ -1,0 +1,50 @@
+services:
+  api:
+    command: ["uvicorn", "main_v2:app", "--host", "0.0.0.0", "--port", "8080", "--workers", "2"]
+
+  rules:
+    build:
+      context: ./app
+      args:
+        ULTRALYTICS_IMAGE: ${ULTRALYTICS_IMAGE:-ultralytics/ultralytics:latest}
+    restart: unless-stopped
+    command: ["python", "rules_worker_v2.py"]
+    env_file:
+      - .env
+    volumes:
+      - ./config:/config:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - vision_light
+
+  media:
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      rules:
+        condition: service_started
+
+  retention:
+    build:
+      context: ./app
+      args:
+        ULTRALYTICS_IMAGE: ${ULTRALYTICS_IMAGE:-ultralytics/ultralytics:latest}
+    restart: unless-stopped
+    command: ["python", "retention_worker.py"]
+    env_file:
+      - .env
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    networks:
+      - vision_light
