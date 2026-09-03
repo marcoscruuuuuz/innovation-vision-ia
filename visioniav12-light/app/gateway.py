@@ -25,6 +25,7 @@ DETECT_FPS = float(os.getenv("DETECT_FPS", "2"))
 CONNECT_TIMEOUT = float(os.getenv("GATEWAY_CONNECT_TIMEOUT_S", "5"))
 READ_TIMEOUT = float(os.getenv("GATEWAY_READ_TIMEOUT_S", "35"))
 LATEST_FRAME_TTL_S = int(os.getenv("LATEST_FRAME_TTL_S", "30"))
+LATEST_FRAME_UI_INTERVAL_S = float(os.getenv("LATEST_FRAME_UI_INTERVAL_S", "5"))
 
 
 def load_registry() -> dict[str, Any]:
@@ -78,6 +79,7 @@ async def camera_loop(
     camera_id = str(camera["camera_id"])
     interval = 1.0 / max(DETECT_FPS, 0.1)
     failures = 0
+    last_ui_snapshot_at = 0.0
     while True:
         started = time.monotonic()
         try:
@@ -95,13 +97,17 @@ async def camera_loop(
                 maxlen=10_000,
                 approximate=True,
             )
-            # The editor needs a current frame, but raw images must never become
-            # long-term storage. This key is overwritten per camera and expires.
-            await redis_client.set(
-                f"{PREFIX}camera:{camera_id}:latest_jpeg_b64",
-                encoded,
-                ex=max(5, LATEST_FRAME_TTL_S),
-            )
+            # The detector receives every admitted frame through the stream. The
+            # ROI editor only needs a recent visual reference, so publish its
+            # snapshot at a bounded cadence instead of writing every 2 FPS JPEG
+            # twice into Redis for the full fleet.
+            if capture_ts - last_ui_snapshot_at >= max(1.0, LATEST_FRAME_UI_INTERVAL_S):
+                await redis_client.set(
+                    f"{PREFIX}camera:{camera_id}:latest_jpeg_b64",
+                    encoded,
+                    ex=max(5, LATEST_FRAME_TTL_S),
+                )
+                last_ui_snapshot_at = capture_ts
             await redis_client.hset(
                 f"{PREFIX}camera:{camera_id}:health",
                 mapping={
@@ -163,6 +169,7 @@ async def main() -> None:
                 "camera_tasks": len(tasks),
                 "state": "RUNNING",
                 "latest_frame_ttl_s": LATEST_FRAME_TTL_S,
+                "latest_frame_ui_interval_s": LATEST_FRAME_UI_INTERVAL_S,
             },
         )
         await asyncio.gather(*tasks)
