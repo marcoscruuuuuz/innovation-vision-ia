@@ -60,3 +60,8 @@ def media_proxy(
         headers["Content-Length"] = str(stat.size)
 
     return StreamingResponse(object_stream(response), media_type=media_type, headers=headers)
+
+
+# Registers the production administration, client portal, camera status,
+# user management and deterministic ROI editor routes on the same app.
+import ui_v3  # noqa: E402,F401
