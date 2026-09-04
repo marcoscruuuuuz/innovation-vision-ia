@@ -1,0 +1,65 @@
+services:
+  api:
+    command: ["uvicorn", "main_v2:app", "--host", "0.0.0.0", "--port", "8080", "--workers", "1"]
+
+  ingest:
+    command: ["python", "gateway_v2.py"]
+
+  rules:
+    build:
+      context: ./app
+      args:
+        ULTRALYTICS_IMAGE: ${ULTRALYTICS_IMAGE:-ultralytics/ultralytics:latest}
+    restart: unless-stopped
+    command: ["python", "rules_worker_v2.py"]
+    environment:
+      DATABASE_URL: ${DATABASE_URL:?set DATABASE_URL}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      REDIS_PREFIX: ${REDIS_PREFIX:-vl:}
+      RULE_REFRESH_S: ${RULE_REFRESH_S:-5}
+      TZ: ${TZ:-America/Sao_Paulo}
+    volumes:
+      - ./config:/config:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - vision_light
+
+  media:
+    command: ["python", "media_worker_v3.py"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      rules:
+        condition: service_started
+
+  retention:
+    build:
+      context: ./app
+      args:
+        ULTRALYTICS_IMAGE: ${ULTRALYTICS_IMAGE:-ultralytics/ultralytics:latest}
+    restart: unless-stopped
+    command: ["python", "retention_worker.py"]
+    environment:
+      DATABASE_URL: ${DATABASE_URL:?set DATABASE_URL}
+      MINIO_ENDPOINT: ${MINIO_ENDPOINT:-minio:9000}
+      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:?set MINIO_ROOT_USER}
+      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:?set MINIO_ROOT_PASSWORD}
+      MINIO_SECURE: ${MINIO_SECURE:-false}
+      MINIO_BUCKET: ${MINIO_BUCKET:-vision-light}
+      MEDIA_RETENTION_DAYS: ${MEDIA_RETENTION_DAYS:-7}
+      TZ: ${TZ:-America/Sao_Paulo}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    networks:
+      - vision_light

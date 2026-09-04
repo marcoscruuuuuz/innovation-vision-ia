@@ -1,0 +1,282 @@
+version: 1
+coordinate_space: normalized_xyxy_0_1
+media_contract:
+  snapshot_required: true
+  clip_required: true
+  clip_seconds: 15
+  clip_pre_seconds: 5
+  clip_post_seconds: 10
+  visible_only_after_media_validation: true
+
+priorities:
+  total: 100
+  high: 80
+  normal: 50
+
+# mode: full_frame | polygon | single_line | double_line | state | physical_alarm
+# status: canary_ready | requires_camera_geometry | requires_local_training | requires_external_integration
+
+events:
+  animal_em_geral:
+    title: Animais e pets
+    priority: high
+    mode: full_frame
+    classes: [dog, cat]
+    min_confidence: 0.25
+    temporal:
+      min_hits: 3
+      window_seconds: 3
+    status: canary_ready
+
+  animal_solto:
+    title: Animal solto
+    priority: high
+    mode: polygon
+    classes: [dog, cat, person]
+    logic: animal_without_associated_person
+    owner_radius_px: 260
+    absence_seconds: 5
+    status: requires_camera_geometry
+
+  animal_com_tutor:
+    title: Animal com tutor
+    priority: normal
+    mode: polygon
+    classes: [dog, cat, person]
+    logic: animal_with_associated_person
+    owner_radius_px: 260
+    association_seconds: 2
+    status: requires_camera_geometry
+
+  cachorro_fazendo_fezes:
+    title: Cachorro fazendo fezes
+    priority: total
+    mode: state
+    classes: [dog, person]
+    logic: dog_defecation_state_monitor
+    dog_history_seconds: 6
+    minimum_observations: 4
+    static_px: 28
+    static_seconds: 5
+    aspect_ratio_change: 0.18
+    owner_radius_px: 260
+    certification_required: true
+    status: canary_ready
+
+  possiveis_fezes:
+    title: Possíveis fezes
+    priority: total
+    mode: state
+    classes: [dog, person]
+    logic: suspicious_ground_zone_after_dog
+    dog_history_seconds: 6
+    collect_radius_px: 90
+    departure_radius_px: 180
+    certification_required: true
+    status: canary_ready
+
+  morador_nao_recolheu_fezes:
+    title: Morador não recolheu fezes
+    priority: total
+    mode: state
+    classes: [dog, person]
+    logic: no_pickup_after_departure
+    owner_radius_px: 260
+    collect_radius_px: 90
+    departure_radius_px: 180
+    pickup_presence_seconds: 2
+    no_pickup_seconds_after_departure: 30
+    certification_required: true
+    status: canary_ready
+
+  face_detectada:
+    title: Face detectada
+    priority: normal
+    mode: state
+    classes: [person]
+    logic: face_crop_detector_on_demand
+    cooldown_seconds: 30
+    status: requires_local_training
+
+  pessoa_fora_horario_22h:
+    title: Pessoa fora do horário 22h
+    priority: high
+    mode: full_frame
+    classes: [person]
+    schedule:
+      timezone: America/Sao_Paulo
+      start: '22:00'
+      end: '06:00'
+    dwell_seconds: 3
+    status: canary_ready
+
+  porta_bloco_aberta:
+    title: Porta do bloco aberta
+    priority: total
+    mode: polygon
+    classes: [person]
+    logic: door_state_plus_dwell
+    dwell_seconds: 10
+    status: requires_camera_geometry
+
+  possivel_porteiro_dormindo:
+    title: Possível porteiro dormindo
+    priority: total
+    mode: state
+    classes: [person]
+    logic: human_pose_low_motion_in_guard_roi
+    pose_selective: true
+    dwell_seconds: 120
+    status: requires_camera_geometry
+
+  entrada_vacuo:
+    title: Entrada a vácuo
+    priority: total
+    mode: double_line
+    classes: [person]
+    sequence: [L1, L2]
+    same_track_required: true
+    timeout_seconds: 8
+    output_without_access_control: possible_entry_tailgating
+    confirmed_requires_access_control: true
+    status: requires_external_integration
+
+  saida_vacuo:
+    title: Saída a vácuo
+    priority: total
+    mode: double_line
+    classes: [person]
+    sequence: [L2, L1]
+    same_track_required: true
+    timeout_seconds: 8
+    output_without_access_control: possible_exit_tailgating
+    confirmed_requires_access_control: true
+    status: requires_external_integration
+
+  porteiro_fora_posto:
+    title: Porteiro fora do posto
+    priority: total
+    mode: polygon
+    classes: [person]
+    logic: guard_roi_empty
+    empty_seconds: 120
+    status: requires_camera_geometry
+
+  linha_perimetral_cerca_eletrica:
+    title: Linha perimetral cerca elétrica
+    priority: total
+    mode: physical_alarm
+    classes: [person, dog, cat, car, motorcycle]
+    physical_alarm_source_required: true
+    vision_role: correlation_and_evidence
+    status: requires_external_integration
+
+  linha_perimetral_disparo:
+    title: Linha perimetral disparo
+    priority: total
+    mode: single_line
+    classes: [person, car, motorcycle, dog, cat]
+    direction_required: false
+    status: requires_camera_geometry
+
+  porta_manutencao:
+    title: Porta manutenção
+    priority: normal
+    mode: polygon
+    classes: [person]
+    logic: snapshot_on_roi_pass
+    dwell_seconds: 0
+    status: requires_camera_geometry
+
+  linha_velocidade:
+    title: Linha de velocidade
+    priority: total
+    mode: double_line
+    classes: [car, motorcycle, bus, truck, bicycle]
+    minimum_track_points: 3
+    calibration_required: true
+    status: requires_camera_geometry
+
+  lixo_no_chao:
+    title: Lixo no chão
+    priority: total
+    mode: state
+    classes: [person]
+    logic: person_leaves_object_and_departs
+    persistence_seconds: 10
+    certification_required: true
+    status: requires_local_training
+
+  muro_condominio:
+    title: Muro condomínio
+    priority: total
+    mode: polygon
+    classes: [person]
+    dwell_seconds: 2
+    status: requires_camera_geometry
+
+  area_proibida:
+    title: Área proibida
+    priority: total
+    mode: polygon
+    classes: [person, car, motorcycle, bicycle]
+    dwell_seconds: 2
+    status: requires_camera_geometry
+
+  veiculo_parado_irregular:
+    title: Veículo parado irregular
+    priority: total
+    mode: polygon
+    classes: [car, motorcycle, bus, truck]
+    stationary_seconds: 120
+    status: requires_camera_geometry
+
+  veiculo_contramao:
+    title: Veículo na contramão
+    priority: total
+    mode: single_line
+    classes: [car, motorcycle, bus, truck, bicycle]
+    minimum_track_points: 3
+    direction_required: true
+    status: requires_camera_geometry
+
+  placa_detectada:
+    title: Placa detectada
+    priority: total
+    mode: state
+    classes: [car, motorcycle, bus, truck]
+    logic: vehicle_crop_then_plate_detector_then_ocr
+    minimum_vehicle_width_px: 120
+    multi_frame_consensus: 3
+    status: requires_local_training
+
+  crianca_com_pipa:
+    title: Criança com pipa
+    priority: total
+    mode: polygon
+    classes: [person, kite]
+    logic: person_kite_temporal_association
+    minimum_seconds: 2
+    child_age_classifier_required_for_child_label: true
+    safe_fallback_event: pessoa_com_pipa
+    status: requires_camera_geometry
+
+  criancas_jogando_bola:
+    title: Crianças jogando bola
+    priority: total
+    mode: polygon
+    classes: [person, sports ball]
+    logic: person_ball_temporal_interaction
+    minimum_hits: 2
+    child_age_classifier_required_for_child_label: true
+    safe_fallback_event: pessoas_jogando_bola
+    status: requires_camera_geometry
+
+  pessoa_bicicleta_area_comum:
+    title: Pessoa de bicicleta em área comum
+    priority: total
+    mode: polygon
+    classes: [person, bicycle]
+    logic: bicycle_in_motion_with_person_association
+    minimum_track_points: 3
+    status: requires_camera_geometry

@@ -1,0 +1,178 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex,nofollow">
+  <title>INNOVATION VISION IA · Administração</title>
+  <link rel="stylesheet" href="/assets/app.css">
+</head>
+<body>
+  <section id="loginView" class="login-shell">
+    <form id="loginForm" class="login-card">
+      <div class="brand-mark">IV</div>
+      <h1>Administração VISION IA</h1>
+      <p>Gerencie câmeras, usuários, regras, ROIs, linhas, logs e o estado operacional do V12 Light.</p>
+      <div class="field"><label for="loginEmail">E-mail</label><input id="loginEmail" type="email" autocomplete="username" required></div>
+      <div class="field"><label for="loginPassword">Senha</label><input id="loginPassword" type="password" autocomplete="current-password" required></div>
+      <button class="btn btn-primary full" type="submit">Entrar na administração</button>
+      <div id="loginError" class="error"></div>
+    </form>
+  </section>
+
+  <div id="appView" class="app-shell hidden">
+    <aside class="sidebar">
+      <div class="sidebar-brand">
+        <strong>INNOVATION VISION IA</strong>
+        <span>V12 Light · Administração</span>
+      </div>
+      <nav class="nav" id="adminNav">
+        <button data-view="overview" class="active">Visão geral</button>
+        <button data-view="cameras">Câmeras</button>
+        <button data-view="rules">Regras e ROI</button>
+        <button data-view="users">Usuários</button>
+        <button data-view="logs">Logs</button>
+        <button data-view="system">Sistema</button>
+      </nav>
+      <div class="sidebar-footer">
+        <div id="sidebarUser">—</div>
+        <div id="sidebarScope">Acesso administrativo</div>
+      </div>
+    </aside>
+
+    <main class="workspace">
+      <header class="topbar">
+        <div><h1 id="pageTitle">Visão geral</h1></div>
+        <div class="topbar-actions">
+          <span class="env-pill" id="publicUrl">V12 Light</span>
+          <span class="user-pill" id="topUser">—</span>
+          <button id="logoutButton" class="btn btn-ghost btn-sm">Sair</button>
+        </div>
+      </header>
+
+      <div class="content">
+        <section id="view-overview" class="view active">
+          <div class="view-head">
+            <div><h2>Operação em tempo real</h2><p>Estado das câmeras, regras, logs e serviços do sistema.</p></div>
+            <div class="actions"><button id="refreshOverview" class="btn btn-blue">Atualizar agora</button></div>
+          </div>
+          <div class="cards">
+            <div class="card"><div class="label">Câmeras</div><div class="value" id="ovCameras">—</div><div class="hint" id="ovCamerasHint">—</div></div>
+            <div class="card"><div class="label">Online</div><div class="value" id="ovOnline">—</div><div class="hint">Frame dentro da janela operacional</div></div>
+            <div class="card"><div class="label">Degradadas</div><div class="value" id="ovDegraded">—</div><div class="hint">Possuem frame recente ou erro parcial</div></div>
+            <div class="card"><div class="label">Regras ativas</div><div class="value" id="ovRules">—</div><div class="hint" id="ovRulesHint">—</div></div>
+            <div class="card"><div class="label">Logs 24h</div><div class="value" id="ovLogs">—</div><div class="hint" id="ovLogsHint">—</div></div>
+          </div>
+          <div class="grid-2">
+            <div class="panel"><h3>Serviços</h3><div class="table-wrap"><table><thead><tr><th>Serviço</th><th>Estado</th><th>Atualização</th></tr></thead><tbody id="serviceRows"></tbody></table></div></div>
+            <div class="panel"><h3>Distribuição das regras</h3><div id="ruleStateCards" class="grid-3"></div></div>
+          </div>
+        </section>
+
+        <section id="view-cameras" class="view">
+          <div class="view-head">
+            <div><h2>Câmeras</h2><p>Visualize online/offline, erros, DVR, canal e abra diretamente o editor de ROI.</p></div>
+            <div class="actions">
+              <button id="syncRegistryButton" class="btn">Sincronizar cadastro</button>
+              <button id="refreshCameras" class="btn btn-blue">Atualizar</button>
+            </div>
+          </div>
+          <div class="panel">
+            <div class="toolbar">
+              <input id="cameraSearch" placeholder="Buscar câmera, condomínio ou DVR">
+              <select id="cameraState"><option value="">Todos os estados</option><option>ONLINE</option><option>DEGRADED</option><option>OFFLINE</option></select>
+              <select id="cameraCondo"><option value="">Todos os condomínios</option></select>
+            </div>
+            <div class="table-wrap"><table><thead><tr><th>Estado</th><th>Condomínio</th><th>Câmera</th><th>DVR</th><th>Canal</th><th>Último frame</th><th>Falhas</th><th>Ações</th></tr></thead><tbody id="cameraRows"></tbody></table></div>
+          </div>
+        </section>
+
+        <section id="view-rules" class="view">
+          <div class="view-head">
+            <div><h2>Regras e editor de ROI</h2><p>Desenhe polígonos, linhas e dupla linha diretamente sobre o último frame da câmera.</p></div>
+            <div class="actions"><button id="reloadRuleData" class="btn btn-blue">Recarregar</button></div>
+          </div>
+          <div class="roi-layout">
+            <div class="panel editor-form">
+              <div class="field"><label>Câmera</label><select id="ruleCamera"></select></div>
+              <div class="field"><label>Evento</label><select id="ruleEvent"></select></div>
+              <div class="inline-fields">
+                <div class="field"><label>Estado</label><select id="ruleState"><option>DRAFT</option><option>SHADOW</option><option>HOMOLOGATION</option><option>PRODUCTION</option><option>DISABLED</option></select></div>
+                <div class="field"><label>Ativa</label><select id="ruleEnabled"><option value="false">Não</option><option value="true">Sim</option></select></div>
+              </div>
+              <div class="inline-fields">
+                <div class="field"><label>Geometria</label><select id="geometryType"><option value="polygon">Polígono</option><option value="single_line">Linha</option><option value="double_line">Dupla linha</option><option value="none">Sem geometria</option></select></div>
+                <div class="field"><label>Direção</label><select id="ruleDirection"><option value="any">Qualquer</option><option value="positive_x">Esquerda → direita</option><option value="negative_x">Direita → esquerda</option><option value="positive_y">Cima → baixo</option><option value="negative_y">Baixo → cima</option></select></div>
+              </div>
+              <div class="inline-fields">
+                <div class="field"><label>Dwell (s)</label><input id="ruleDwell" type="number" min="0" value="0"></div>
+                <div class="field"><label>Cooldown (s)</label><input id="ruleCooldown" type="number" min="0" value="30"></div>
+              </div>
+              <div class="inline-fields">
+                <div class="field"><label>Timeout dupla linha (s)</label><input id="ruleTimeout" type="number" min="1" value="8"></div>
+                <div class="field"><label>Certificação</label><select id="ruleCertification"><option value="false">Não</option><option value="true">Obrigatória</option></select></div>
+              </div>
+              <div class="field"><label>Configuração adicional JSON</label><textarea id="ruleConfigExtra" spellcheck="false">{}</textarea></div>
+              <div class="actions">
+                <button id="saveRuleButton" class="btn btn-primary">Salvar nova versão</button>
+                <button id="loadRuleButton" class="btn">Carregar versão atual</button>
+              </div>
+              <div id="ruleStatus" class="error"></div>
+              <h3>Geometria normalizada</h3>
+              <div id="geometryPreview" class="code-box">{}</div>
+            </div>
+            <div class="panel">
+              <div class="editor-tools">
+                <button data-draw="polygon" class="btn btn-sm">Desenhar polígono</button>
+                <button data-draw="L1" class="btn btn-sm">Desenhar L1</button>
+                <button data-draw="L2" class="btn btn-sm">Desenhar L2</button>
+                <button id="undoPoint" class="btn btn-sm">Desfazer</button>
+                <button id="clearGeometry" class="btn btn-danger btn-sm">Limpar</button>
+                <button id="reloadSnapshot" class="btn btn-sm">Atualizar frame</button>
+                <span class="env-pill" id="drawModeLabel">Modo: polígono</span>
+              </div>
+              <div class="canvas-shell"><canvas id="roiCanvas" width="960" height="540"></canvas></div>
+            </div>
+          </div>
+        </section>
+
+        <section id="view-users" class="view">
+          <div class="view-head"><div><h2>Usuários e credenciais</h2><p>Crie acessos administrativos ou de clientes com escopo por condomínio.</p></div><div class="actions"><button id="refreshUsers" class="btn btn-blue">Atualizar</button></div></div>
+          <div class="grid-2">
+            <form id="createUserForm" class="panel">
+              <h3>Novo usuário</h3>
+              <div class="field"><label>E-mail</label><input id="newUserEmail" type="email" required></div>
+              <div class="field"><label>Senha inicial</label><div style="display:flex;gap:8px"><input id="newUserPassword" type="text" minlength="12" required><button id="generatePassword" type="button" class="btn">Gerar</button></div></div>
+              <div class="inline-fields"><div class="field"><label>Perfil</label><select id="newUserRole"><option value="client">Cliente</option><option value="admin">Administrador</option></select></div><div class="field"><label>Ativo</label><select id="newUserActive"><option value="true">Sim</option><option value="false">Não</option></select></div></div>
+              <div class="field"><label>Condomínios autorizados</label><input id="newUserScope" placeholder="Condomínio A, Condomínio B"></div>
+              <button class="btn btn-primary full" type="submit">Criar credencial</button>
+              <div id="createdCredential" class="code-box" style="margin-top:12px">A credencial criada será mostrada aqui uma única vez para registro seguro.</div>
+            </form>
+            <div class="panel"><h3>Usuários cadastrados</h3><div class="table-wrap"><table><thead><tr><th>E-mail</th><th>Perfil</th><th>Escopo</th><th>Estado</th><th>Ação</th></tr></thead><tbody id="userRows"></tbody></table></div></div>
+          </div>
+        </section>
+
+        <section id="view-logs" class="view">
+          <div class="view-head"><div><h2>Logs e evidências</h2><p>Audite eventos, decisão, visibilidade, snapshot e clipe.</p></div><div class="actions"><button id="refreshLogs" class="btn btn-blue">Atualizar</button></div></div>
+          <div class="panel">
+            <div class="toolbar"><input id="logSearch" placeholder="Buscar evento, câmera ou condomínio"><input id="logEventFilter" placeholder="event_key"><input id="logCondoFilter" placeholder="Condomínio"></div>
+            <div class="table-wrap"><table><thead><tr><th>Data</th><th>Condomínio</th><th>Câmera</th><th>Evento</th><th>Decisão</th><th>Visível</th><th>Mídia</th></tr></thead><tbody id="logRows"></tbody></table></div>
+          </div>
+        </section>
+
+        <section id="view-system" class="view">
+          <div class="view-head"><div><h2>Sistema e publicação</h2><p>Estado dos serviços, endereço público e parâmetros operacionais.</p></div></div>
+          <div class="grid-2">
+            <div class="panel"><h3>Publicação</h3><div class="code-box" id="systemPublication">Carregando…</div></div>
+            <div class="panel"><h3>Saúde dos serviços</h3><div id="systemServices"></div></div>
+          </div>
+        </section>
+      </div>
+    </main>
+  </div>
+
+  <div id="mediaModal" class="modal-backdrop hidden"><div class="modal"><div class="modal-head"><strong id="modalTitle">Visualização</strong><button id="closeModal" class="btn btn-danger btn-sm">Fechar</button></div><div id="modalBody"></div></div></div>
+  <div id="toastStack" class="toast-stack"></div>
+  <script src="/assets/admin.js" defer></script>
+</body>
+</html>
